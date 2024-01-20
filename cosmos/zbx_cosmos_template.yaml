@@ -1,0 +1,1015 @@
+zabbix_export:
+  version: '6.4'
+  template_groups:
+    - uuid: 14813a0c9112429a8a1da78a1f6efc12
+      name: Nodes
+  templates:
+    - uuid: 6315d91546c54e9db6fa3467e6786a8c
+      template: Cosmos
+      name: Cosmos
+      groups:
+        - name: Nodes
+      items:
+        - uuid: 036c472c0fb84b5a8ea65d3f8fd162a7
+          name: 'Active Validators'
+          type: HTTP_AGENT
+          key: active_validators
+          history: 1h
+          trends: '0'
+          preprocessing:
+            - type: JSONPATH
+              parameters:
+                - $.result.total
+          timeout: 5s
+          url: '{$NODE_RPC_ADDRESS}/validators'
+        - uuid: b1b04bf0bdef4f2c8a868e072ca2181e
+          name: 'Catching Up'
+          type: DEPENDENT
+          key: catching-up
+          delay: '0'
+          trends: '0'
+          valuemap:
+            name: 'Boolean status'
+          preprocessing:
+            - type: JSONPATH
+              parameters:
+                - $.result.sync_info.catching_up
+            - type: BOOL_TO_DECIMAL
+              parameters:
+                - ''
+          master_item:
+            key: rpc-status
+          triggers:
+            - uuid: cebdcef3de814b17baf2ec25d93525fe
+              expression: 'count(/Cosmos/catching-up,#3,"eq",1)=3'
+              recovery_mode: RECOVERY_EXPRESSION
+              recovery_expression: 'count(/Cosmos/catching-up,#3,"eq",0)=3'
+              name: 'Node is catching up'
+              opdata: 'SyncInfo.catching_up={ITEM.LASTVALUE}'
+              priority: WARNING
+        - uuid: 836275cfe0fe4ba0b17b3eb66c94f326
+          name: 'Earliest_Block Height'
+          type: DEPENDENT
+          key: earliest-block-height
+          delay: '0'
+          trends: '0'
+          preprocessing:
+            - type: JSONPATH
+              parameters:
+                - $.result.sync_info.earliest_block_height
+            - type: JAVASCRIPT
+              parameters:
+                - 'return parseInt(value)'
+          master_item:
+            key: rpc-status
+        - uuid: 7390b7a453384a6a9ee8a88de28a2376
+          name: 'Latest Block Height'
+          type: DEPENDENT
+          key: latest-block-height
+          delay: '0'
+          trends: '0'
+          preprocessing:
+            - type: JSONPATH
+              parameters:
+                - $.result.sync_info.latest_block_height
+            - type: JAVASCRIPT
+              parameters:
+                - 'return parseInt(value)'
+          master_item:
+            key: rpc-status
+        - uuid: a05d7d8b4b6346ddbb488f738370d99d
+          name: 'Latest Block Timestamp'
+          type: DEPENDENT
+          key: latest-block-timestamp
+          delay: '0'
+          trends: '0'
+          units: unixtime
+          preprocessing:
+            - type: JSONPATH
+              parameters:
+                - $.result.sync_info.latest_block_time
+            - type: JAVASCRIPT
+              parameters:
+                - 'return parseInt(Date.parse(value) / 1000)'
+          master_item:
+            key: rpc-status
+        - uuid: 1dbd1685d9254bf0b5f3c680a866db61
+          name: 'Minimal signed per window'
+          type: DEPENDENT
+          key: min_signed_per_window
+          delay: '0'
+          history: 1h
+          trends: '0'
+          value_type: FLOAT
+          preprocessing:
+            - type: JSONPATH
+              parameters:
+                - $.params.min_signed_per_window
+          master_item:
+            key: slashing_params
+        - uuid: fa120f4c33fb422e842688530ba7f674
+          name: 'Number of Peers Inbound'
+          type: DEPENDENT
+          key: number-of-peers-in
+          delay: '0'
+          trends: '0'
+          units: peers
+          preprocessing:
+            - type: JSONPATH
+              parameters:
+                - '$.result.peers[?(@.is_outbound == ''false'')].length()'
+          master_item:
+            key: rpc-net-info
+        - uuid: d65dedebb69c45459f46c564a3afeb45
+          name: 'Number of Peers Outbound'
+          type: DEPENDENT
+          key: number-of-peers-out
+          delay: '0'
+          trends: '0'
+          units: peers
+          preprocessing:
+            - type: JSONPATH
+              parameters:
+                - '$.result.peers[?(@.is_outbound == ''true'')].length()'
+          master_item:
+            key: rpc-net-info
+        - uuid: b5b57dd7832f4b5ba0efd1469708a676
+          name: 'Net Info'
+          type: HTTP_AGENT
+          key: rpc-net-info
+          history: 1h
+          trends: '0'
+          value_type: TEXT
+          timeout: 5s
+          url: '{$NODE_RPC_ADDRESS}/net_info'
+        - uuid: 49ce87729c624aa7ba928f3d65f9b39e
+          name: Status
+          type: HTTP_AGENT
+          key: rpc-status
+          history: 1h
+          trends: '0'
+          value_type: TEXT
+          url: '{$NODE_RPC_ADDRESS}/status'
+          triggers:
+            - uuid: f4deee7da2e64521a4fc7f25e1542557
+              expression: 'nodata(/Cosmos/rpc-status,600)=1'
+              name: 'Can`t get data from node RPC'
+              opdata: 'No data from node RPC in last 10min'
+              priority: HIGH
+        - uuid: 062ffe8e3d244bd5b4774df6b28dce29
+          name: 'Signed blocks window'
+          type: DEPENDENT
+          key: signed_blocks_window
+          delay: '0'
+          history: 1h
+          trends: '0'
+          preprocessing:
+            - type: JSONPATH
+              parameters:
+                - $.params.signed_blocks_window
+          master_item:
+            key: slashing_params
+        - uuid: 1ef590db7af5451192f4c461f5e947e8
+          name: 'Slashing params'
+          type: HTTP_AGENT
+          key: slashing_params
+          history: 1h
+          trends: '0'
+          value_type: TEXT
+          timeout: 5s
+          url: '{$NODE_API_ADDRESS}/cosmos/slashing/v1beta1/params'
+        - uuid: e2740ed7f7844d47baefb3783d79c421
+          name: Uptime
+          type: CALCULATED
+          key: uptime
+          trends: '0'
+          value_type: FLOAT
+          units: '%'
+          params: '100-(last(//validator_missed)/last(//signed_blocks_window))*100'
+        - uuid: 97d1132dd0fb4da280bb9cacf33a40d0
+          name: 'Validator Bond Status'
+          type: DEPENDENT
+          key: validator_bond
+          delay: '0'
+          trends: '0'
+          value_type: TEXT
+          preprocessing:
+            - type: JSONPATH
+              parameters:
+                - $.validator.status
+          master_item:
+            key: validator_info
+          triggers:
+            - uuid: 6dc82985ff644fe790bd5437234489ba
+              expression: 'count(/Cosmos/validator_bond,#1,"ne","BOND_STATUS_BONDED")=1'
+              name: 'Validator status is not BONDED'
+              opdata: 'Current validator status: {ITEM.VALUE}'
+              priority: WARNING
+              manual_close: 'YES'
+        - uuid: f3f7719f9d0a44c9889087b4d3540536
+          name: 'Validator Commission'
+          type: HTTP_AGENT
+          key: validator_commission
+          trends: '0'
+          value_type: FLOAT
+          preprocessing:
+            - type: JSONPATH
+              parameters:
+                - '$.commission.commission[?(@.denom == "{$DENOM_TICKER}")].amount.first()'
+            - type: MULTIPLIER
+              parameters:
+                - '{$DENOM}'
+          timeout: 5s
+          url: '{$NODE_API_ADDRESS}/cosmos/distribution/v1beta1/validators/{$VALOPER}/commission'
+        - uuid: 612a02acb1c94cef8d92d88bb347a46d
+          name: 'Validator Info'
+          type: HTTP_AGENT
+          key: validator_info
+          history: 1h
+          trends: '0'
+          value_type: TEXT
+          timeout: 5s
+          url: '{$NODE_API_ADDRESS}/cosmos/staking/v1beta1/validators/{$VALOPER}'
+          triggers:
+            - uuid: 7bd196ed522341e799963373d557db03
+              expression: 'nodata(/Cosmos/validator_info,600)=1'
+              name: 'Can`t get data from node API'
+              opdata: 'No data from node API in last 10min'
+              priority: HIGH
+        - uuid: 40b957a0673a4c8d85437ba5850aac69
+          name: 'Validator Jail Status'
+          type: DEPENDENT
+          key: validator_jail
+          delay: '0'
+          trends: '0'
+          valuemap:
+            name: 'Boolean status'
+          preprocessing:
+            - type: JSONPATH
+              parameters:
+                - $.validator.jailed
+            - type: BOOL_TO_DECIMAL
+              parameters:
+                - ''
+          master_item:
+            key: validator_info
+          triggers:
+            - uuid: 594bf8517b32443bb9f30e2be714bd35
+              expression: 'count(/Cosmos/validator_jail,#1,"eq",1)=1'
+              name: 'Validator JAILED 🫣'
+              priority: DISASTER
+        - uuid: 39b317af58234f0fa49f2423e66387da
+          name: 'Validator Missed Blocks'
+          type: DEPENDENT
+          key: validator_missed
+          delay: '0'
+          trends: '0'
+          preprocessing:
+            - type: JSONPATH
+              parameters:
+                - $.val_signing_info.missed_blocks_counter
+          master_item:
+            key: validator_signing_infos
+          triggers:
+            - uuid: 5e3252a7122c486c8b11be1cf00125e8
+              expression: 'changecount(/Cosmos/validator_missed,5m)>10'
+              name: 'Missed >10 blocks in last 5min'
+              opdata: 'Current missed blocks count: {ITEM.VALUE}'
+              priority: WARNING
+              manual_close: 'YES'
+        - uuid: 5d8e040138e84654a36f00befb5cbefd
+          name: 'Validator Position'
+          type: HTTP_AGENT
+          key: validator_position
+          trends: '0'
+          preprocessing:
+            - type: JAVASCRIPT
+              parameters:
+                - |
+                  var json = JSON.parse(value);
+                  json.validators.sort(function(a, b) {
+                      const aValue = a.tokens;
+                      const bValue = b.tokens;
+                      if (aValue.length !== bValue.length) {
+                          return bValue.length - aValue.length;
+                      }
+                      // If lengths are the same, perform lexicographic (string) comparison
+                      if (aValue > bValue) {
+                          return -1;  // a should come before b in the sorted order
+                      } else if (aValue < bValue) {
+                          return 1;   // a should come after b in the sorted order
+                      } else {
+                          return 0;   // a and b are equal, so their order doesn't matter
+                      }
+                  });
+                  var position = -1; // Default value, assuming the address is not found
+                  for (var i = 0; i < json.validators.length; i++) {
+                      if (json.validators[i].operator_address === "{$VALOPER}") {
+                          position = i+1;
+                          break;
+                      }
+                  }
+                  return position;
+          timeout: 5s
+          url: '{$NODE_API_ADDRESS}/cosmos/staking/v1beta1/validators?status=BOND_STATUS_BONDED&pagination.limit=200'
+        - uuid: f718b922b0d14b8393c4c83b53c22991
+          name: 'Validator Rewards'
+          type: HTTP_AGENT
+          key: validator_rewards
+          trends: '0'
+          value_type: FLOAT
+          preprocessing:
+            - type: JSONPATH
+              parameters:
+                - '$.total[?(@.denom == "{$DENOM_TICKER}")].amount.first()'
+            - type: MULTIPLIER
+              parameters:
+                - '{$DENOM}'
+          timeout: 5s
+          url: '{$NODE_API_ADDRESS}/cosmos/distribution/v1beta1/delegators/{$SELF_BOND_WALLET}/rewards'
+        - uuid: 5d00483a4b8d4893856a039d7edcab9c
+          name: 'Validator Signing Infos'
+          type: HTTP_AGENT
+          key: validator_signing_infos
+          history: 1h
+          trends: '0'
+          value_type: TEXT
+          timeout: 5s
+          url: '{$NODE_API_ADDRESS}/cosmos/slashing/v1beta1/signing_infos/{$VALCONS}'
+        - uuid: d5028dca1b6c4f709426a2d556284614
+          name: 'Validator Tombstone Status'
+          type: DEPENDENT
+          key: validator_tombstoned
+          delay: '0'
+          trends: '0'
+          valuemap:
+            name: 'Boolean status'
+          preprocessing:
+            - type: JSONPATH
+              parameters:
+                - $.val_signing_info.tombstoned
+            - type: BOOL_TO_DECIMAL
+              parameters:
+                - ''
+          master_item:
+            key: validator_signing_infos
+          triggers:
+            - uuid: 42f3561826674454b8cc2a763643fac6
+              expression: 'count(/Cosmos/validator_tombstoned,#1,"eq",1)=1'
+              name: 'Validator TOMBSTONED ⚰️'
+              priority: DISASTER
+        - uuid: 286b748ef15a453e95c16448b504187a
+          name: 'Validator wallet balance'
+          type: HTTP_AGENT
+          key: validator_wallet_balance
+          trends: '0'
+          value_type: FLOAT
+          preprocessing:
+            - type: JSONPATH
+              parameters:
+                - '$.balances[?(@.denom == "{$DENOM_TICKER}")].amount.first()'
+            - type: MULTIPLIER
+              parameters:
+                - '{$DENOM}'
+          timeout: 5s
+          url: '{$NODE_API_ADDRESS}/cosmos/bank/v1beta1/balances/{$SELF_BOND_WALLET}'
+          triggers:
+            - uuid: d935f8902f1a4de3aa6503c371bdb882
+              expression: change(/Cosmos/validator_wallet_balance)>10
+              name: 'Wallet balance INCREASED 💸'
+              opdata: 'Current balance: {ITEM.VALUE}'
+              priority: INFO
+              manual_close: 'YES'
+        - uuid: 7ed322179e2b448c970f4e5f621a275a
+          name: 'Voting Power'
+          type: DEPENDENT
+          key: voting_power
+          delay: '0'
+          trends: '0'
+          preprocessing:
+            - type: JSONPATH
+              parameters:
+                - $.result.validator_info.voting_power
+          master_item:
+            key: rpc-status
+          triggers:
+            - uuid: 1956c379fbcc429d9183788c60617812
+              expression: change(/Cosmos/voting_power)<-10
+              name: 'Voting power DECREASED 📉'
+              opdata: 'Current voting power: {ITEM.VALUE}'
+              priority: INFO
+              type: MULTIPLE
+            - uuid: cc18f768ef4d4a1080e15af47bda839a
+              expression: change(/Cosmos/voting_power)>10
+              name: 'Voting power INCREASED 📈'
+              opdata: 'Current voting power: {ITEM.VALUE}'
+              priority: INFO
+              manual_close: 'YES'
+      macros:
+        - macro: '{$DENOM}'
+          value: '1.0E-6'
+          description: 'Denom multiplier, example: 0.000001'
+        - macro: '{$DENOM_TICKER}'
+          description: 'Denom ticker, example: ATOM'
+        - macro: '{$NODE_API_ADDRESS}'
+          description: 'Node API address (ip:port or https link) example: http://1.2.3.4:1317'
+        - macro: '{$NODE_RPC_ADDRESS}'
+          description: 'Node RPC address (ip:port or https link) example: http://1.2.3.4:26657'
+        - macro: '{$SELF_BOND_WALLET}'
+          description: 'Self bond wallet address'
+        - macro: '{$VALCONS}'
+          description: 'Validator consensus address'
+        - macro: '{$VALOPER}'
+          description: 'Validator operator address'
+      dashboards:
+        - uuid: c62a374657624da485135f71bed2e9d1
+          name: 'Cosmos Node'
+          auto_start: 'NO'
+          pages:
+            - name: Status
+              widgets:
+                - type: item
+                  width: '24'
+                  hide_header: 'YES'
+                  fields:
+                    - type: INTEGER
+                      name: adv_conf
+                      value: '1'
+                    - type: STRING
+                      name: description
+                      value: |
+                        {$NODE_ADDRESS}
+                        Node Status
+                    - type: INTEGER
+                      name: desc_size
+                      value: '50'
+                    - type: INTEGER
+                      name: desc_v_pos
+                      value: '1'
+                    - type: ITEM
+                      name: itemid
+                      value:
+                        host: Cosmos
+                        key: rpc-status
+                    - type: INTEGER
+                      name: show
+                      value: '1'
+                - type: item
+                  'y': '2'
+                  width: '5'
+                  height: '3'
+                  hide_header: 'YES'
+                  fields:
+                    - type: INTEGER
+                      name: adv_conf
+                      value: '1'
+                    - type: INTEGER
+                      name: decimal_places
+                      value: '0'
+                    - type: ITEM
+                      name: itemid
+                      value:
+                        host: Cosmos
+                        key: latest-block-height
+                    - type: INTEGER
+                      name: show
+                      value: '1'
+                    - type: INTEGER
+                      name: show
+                      value: '2'
+                    - type: INTEGER
+                      name: show
+                      value: '3'
+                    - type: INTEGER
+                      name: units_bold
+                      value: '0'
+                    - type: INTEGER
+                      name: units_show
+                      value: '0'
+                - type: item
+                  'y': '5'
+                  width: '5'
+                  height: '3'
+                  hide_header: 'YES'
+                  fields:
+                    - type: INTEGER
+                      name: adv_conf
+                      value: '1'
+                    - type: INTEGER
+                      name: decimal_places
+                      value: '0'
+                    - type: INTEGER
+                      name: show
+                      value: '1'
+                    - type: INTEGER
+                      name: show
+                      value: '2'
+                    - type: STRING
+                      name: thresholds.color.0
+                      value: 388E3C
+                    - type: STRING
+                      name: thresholds.color.1
+                      value: FB8C00
+                    - type: STRING
+                      name: thresholds.color.2
+                      value: D32F2F
+                    - type: STRING
+                      name: thresholds.threshold.0
+                      value: '0'
+                    - type: STRING
+                      name: thresholds.threshold.1
+                      value: '8'
+                    - type: STRING
+                      name: thresholds.threshold.2
+                      value: '10'
+                - type: item
+                  'y': '8'
+                  width: '24'
+                  hide_header: 'YES'
+                  fields:
+                    - type: INTEGER
+                      name: adv_conf
+                      value: '1'
+                    - type: STRING
+                      name: description
+                      value: |
+                        {$VALOPER} 
+                        Validator Status
+                    - type: INTEGER
+                      name: desc_size
+                      value: '50'
+                    - type: INTEGER
+                      name: desc_v_pos
+                      value: '1'
+                    - type: ITEM
+                      name: itemid
+                      value:
+                        host: Cosmos
+                        key: rpc-status
+                    - type: INTEGER
+                      name: show
+                      value: '1'
+                - type: item
+                  'y': '10'
+                  width: '5'
+                  height: '3'
+                  hide_header: 'YES'
+                  fields:
+                    - type: INTEGER
+                      name: adv_conf
+                      value: '1'
+                    - type: INTEGER
+                      name: decimal_places
+                      value: '0'
+                    - type: INTEGER
+                      name: decimal_size
+                      value: '15'
+                    - type: ITEM
+                      name: itemid
+                      value:
+                        host: Cosmos
+                        key: validator_bond
+                    - type: INTEGER
+                      name: show
+                      value: '1'
+                    - type: INTEGER
+                      name: show
+                      value: '2'
+                    - type: INTEGER
+                      name: units_bold
+                      value: '0'
+                    - type: INTEGER
+                      name: units_show
+                      value: '0'
+                    - type: INTEGER
+                      name: value_size
+                      value: '15'
+                - type: item
+                  'y': '13'
+                  width: '5'
+                  height: '3'
+                  hide_header: 'YES'
+                  fields:
+                    - type: INTEGER
+                      name: adv_conf
+                      value: '1'
+                    - type: INTEGER
+                      name: decimal_places
+                      value: '0'
+                    - type: ITEM
+                      name: itemid
+                      value:
+                        host: Cosmos
+                        key: validator_missed
+                    - type: INTEGER
+                      name: show
+                      value: '1'
+                    - type: INTEGER
+                      name: show
+                      value: '2'
+                    - type: STRING
+                      name: thresholds.color.0
+                      value: 388E3C
+                    - type: STRING
+                      name: thresholds.color.1
+                      value: FDD835
+                    - type: STRING
+                      name: thresholds.color.2
+                      value: F57C00
+                    - type: STRING
+                      name: thresholds.color.3
+                      value: FF0000
+                    - type: STRING
+                      name: thresholds.threshold.0
+                      value: '0'
+                    - type: STRING
+                      name: thresholds.threshold.1
+                      value: '10'
+                    - type: STRING
+                      name: thresholds.threshold.2
+                      value: '30'
+                    - type: STRING
+                      name: thresholds.threshold.3
+                      value: '50'
+                    - type: INTEGER
+                      name: units_bold
+                      value: '0'
+                    - type: INTEGER
+                      name: units_show
+                      value: '0'
+                - type: item
+                  x: '5'
+                  'y': '2'
+                  width: '5'
+                  height: '3'
+                  hide_header: 'YES'
+                  fields:
+                    - type: INTEGER
+                      name: adv_conf
+                      value: '1'
+                    - type: INTEGER
+                      name: decimal_places
+                      value: '0'
+                    - type: ITEM
+                      name: itemid
+                      value:
+                        host: Cosmos
+                        key: catching-up
+                    - type: INTEGER
+                      name: show
+                      value: '1'
+                    - type: INTEGER
+                      name: show
+                      value: '2'
+                    - type: INTEGER
+                      name: units_bold
+                      value: '0'
+                    - type: INTEGER
+                      name: units_show
+                      value: '0'
+                - type: item
+                  x: '5'
+                  'y': '5'
+                  width: '5'
+                  height: '3'
+                  hide_header: 'YES'
+                  fields:
+                    - type: INTEGER
+                      name: adv_conf
+                      value: '1'
+                    - type: INTEGER
+                      name: decimal_places
+                      value: '0'
+                    - type: ITEM
+                      name: itemid
+                      value:
+                        host: Cosmos
+                        key: number-of-peers-in
+                    - type: INTEGER
+                      name: show
+                      value: '1'
+                    - type: INTEGER
+                      name: show
+                      value: '2'
+                - type: item
+                  x: '5'
+                  'y': '10'
+                  width: '5'
+                  height: '3'
+                  hide_header: 'YES'
+                  fields:
+                    - type: INTEGER
+                      name: adv_conf
+                      value: '1'
+                    - type: INTEGER
+                      name: decimal_places
+                      value: '0'
+                    - type: ITEM
+                      name: itemid
+                      value:
+                        host: Cosmos
+                        key: voting_power
+                    - type: INTEGER
+                      name: show
+                      value: '1'
+                    - type: INTEGER
+                      name: show
+                      value: '2'
+                    - type: STRING
+                      name: units
+                      value: '!NLS'
+                    - type: INTEGER
+                      name: units_size
+                      value: '20'
+                - type: item
+                  x: '10'
+                  'y': '2'
+                  width: '5'
+                  height: '3'
+                  hide_header: 'YES'
+                  fields:
+                    - type: INTEGER
+                      name: adv_conf
+                      value: '1'
+                    - type: INTEGER
+                      name: decimal_places
+                      value: '0'
+                    - type: INTEGER
+                      name: show
+                      value: '1'
+                    - type: INTEGER
+                      name: show
+                      value: '2'
+                    - type: INTEGER
+                      name: units_bold
+                      value: '0'
+                    - type: INTEGER
+                      name: units_show
+                      value: '0'
+                - type: item
+                  x: '10'
+                  'y': '5'
+                  width: '5'
+                  height: '3'
+                  hide_header: 'YES'
+                  fields:
+                    - type: INTEGER
+                      name: adv_conf
+                      value: '1'
+                    - type: INTEGER
+                      name: decimal_places
+                      value: '0'
+                    - type: ITEM
+                      name: itemid
+                      value:
+                        host: Cosmos
+                        key: number-of-peers-out
+                    - type: INTEGER
+                      name: show
+                      value: '1'
+                    - type: INTEGER
+                      name: show
+                      value: '2'
+                - type: item
+                  x: '10'
+                  'y': '10'
+                  width: '5'
+                  height: '3'
+                  hide_header: 'YES'
+                  fields:
+                    - type: INTEGER
+                      name: adv_conf
+                      value: '1'
+                    - type: ITEM
+                      name: itemid
+                      value:
+                        host: Cosmos
+                        key: validator_commission
+                    - type: INTEGER
+                      name: show
+                      value: '1'
+                    - type: INTEGER
+                      name: show
+                      value: '2'
+                    - type: STRING
+                      name: units
+                      value: '!NLS'
+                    - type: INTEGER
+                      name: units_bold
+                      value: '0'
+                    - type: INTEGER
+                      name: units_size
+                      value: '20'
+                - type: item
+                  x: '15'
+                  'y': '10'
+                  width: '5'
+                  height: '3'
+                  hide_header: 'YES'
+                  fields:
+                    - type: INTEGER
+                      name: adv_conf
+                      value: '1'
+                    - type: ITEM
+                      name: itemid
+                      value:
+                        host: Cosmos
+                        key: validator_wallet_balance
+                    - type: INTEGER
+                      name: show
+                      value: '1'
+                    - type: INTEGER
+                      name: show
+                      value: '2'
+                    - type: STRING
+                      name: units
+                      value: '!NLS'
+                    - type: INTEGER
+                      name: units_bold
+                      value: '0'
+                    - type: INTEGER
+                      name: units_size
+                      value: '20'
+                - type: item
+                  x: '16'
+                  'y': '2'
+                  width: '4'
+                  height: '3'
+                  hide_header: 'YES'
+                  fields:
+                    - type: INTEGER
+                      name: adv_conf
+                      value: '1'
+                    - type: INTEGER
+                      name: show
+                      value: '1'
+                    - type: INTEGER
+                      name: show
+                      value: '2'
+                    - type: STRING
+                      name: thresholds.color.0
+                      value: C62828
+                    - type: STRING
+                      name: thresholds.color.1
+                      value: 388E3C
+                    - type: STRING
+                      name: thresholds.threshold.0
+                      value: '0'
+                    - type: STRING
+                      name: thresholds.threshold.1
+                      value: '1'
+                - type: item
+                  x: '16'
+                  'y': '5'
+                  width: '4'
+                  height: '3'
+                  hide_header: 'YES'
+                  fields:
+                    - type: INTEGER
+                      name: adv_conf
+                      value: '1'
+                    - type: INTEGER
+                      name: show
+                      value: '1'
+                    - type: INTEGER
+                      name: show
+                      value: '2'
+                    - type: STRING
+                      name: thresholds.color.0
+                      value: C62828
+                    - type: STRING
+                      name: thresholds.color.1
+                      value: 388E3C
+                    - type: STRING
+                      name: thresholds.threshold.0
+                      value: '0'
+                    - type: STRING
+                      name: thresholds.threshold.1
+                      value: '1'
+                - type: item
+                  x: '20'
+                  'y': '2'
+                  width: '4'
+                  height: '3'
+                  hide_header: 'YES'
+                  fields:
+                    - type: INTEGER
+                      name: adv_conf
+                      value: '1'
+                    - type: INTEGER
+                      name: show
+                      value: '1'
+                    - type: INTEGER
+                      name: show
+                      value: '2'
+                    - type: STRING
+                      name: thresholds.color.0
+                      value: C62828
+                    - type: STRING
+                      name: thresholds.color.1
+                      value: 388E3C
+                    - type: STRING
+                      name: thresholds.threshold.0
+                      value: '0'
+                    - type: STRING
+                      name: thresholds.threshold.1
+                      value: '1'
+                - type: item
+                  x: '20'
+                  'y': '5'
+                  width: '4'
+                  height: '3'
+                  hide_header: 'YES'
+                  fields:
+                    - type: INTEGER
+                      name: adv_conf
+                      value: '1'
+                    - type: INTEGER
+                      name: show
+                      value: '1'
+                    - type: INTEGER
+                      name: show
+                      value: '2'
+                    - type: STRING
+                      name: thresholds.color.0
+                      value: C62828
+                    - type: STRING
+                      name: thresholds.color.1
+                      value: 388E3C
+                    - type: STRING
+                      name: thresholds.threshold.0
+                      value: '0'
+                    - type: STRING
+                      name: thresholds.threshold.1
+                      value: '1'
+                - type: item
+                  x: '20'
+                  'y': '10'
+                  width: '4'
+                  height: '3'
+                  hide_header: 'YES'
+                  fields:
+                    - type: INTEGER
+                      name: adv_conf
+                      value: '1'
+                    - type: INTEGER
+                      name: decimal_places
+                      value: '0'
+                    - type: ITEM
+                      name: itemid
+                      value:
+                        host: Cosmos
+                        key: validator_jail
+                    - type: INTEGER
+                      name: show
+                      value: '1'
+                    - type: INTEGER
+                      name: show
+                      value: '2'
+                    - type: INTEGER
+                      name: units_bold
+                      value: '0'
+                    - type: INTEGER
+                      name: units_show
+                      value: '0'
+      valuemaps:
+        - uuid: 552f6a530df946cd9c5ff1de9019715e
+          name: 'Boolean status'
+          mappings:
+            - value: '0'
+              newvalue: 'False'
+            - value: '1'
+              newvalue: 'True'
+        - uuid: 6410e24185b841e79233df52cb8f3512
+          name: 'Service staus'
+          mappings:
+            - value: '0'
+              newvalue: Down
+            - value: '1'
+              newvalue: Up
+  triggers:
+    - uuid: 8d79cf9f729f46c089e3884662c049f0
+      expression: 'changecount(/Cosmos/latest-block-height,10m)=0 and last(/Cosmos/latest-block-timestamp)<>0'
+      name: 'No new blocks produced since {ITEM.LASTVALUE2}'
+      opdata: 'Latest block height: {ITEM.LASTVALUE1} Latest block timestamp: {ITEM.LASTVALUE2}'
+      priority: AVERAGE
+    - uuid: ba36504244b5436ca847691937d9eed0
+      expression: last(/Cosmos/active_validators)-last(/Cosmos/validator_position)<=1
+      name: 'Validator at last position of active set'
+      opdata: 'Current position: {ITEM.VALUE2} Active set: {ITEM.VALUE1}'
+      priority: WARNING
+      manual_close: 'YES'
+  graphs:
+    - uuid: d1bb1d99dfe0477a9a60fa5da7f49d1e
+      name: 'Missed Blocks'
+      yaxismax: '0'
+      show_work_period: 'NO'
+      show_triggers: 'NO'
+      type: EXPLODED
+      show_legend: 'NO'
+      graph_items:
+        - color: FF0000
+          calc_fnc: MIN
+          item:
+            host: Cosmos
+            key: validator_missed
