@@ -1,0 +1,347 @@
+zabbix_export:
+  version: '6.4'
+  template_groups:
+    - uuid: 14813a0c9112429a8a1da78a1f6efc12
+      name: Nodes
+  templates:
+    - uuid: 0413a9de3ce148e3966e822a5502201b
+      template: Autonity
+      name: Autonity
+      groups:
+        - name: Nodes
+      items:
+        - uuid: bb2c27d16387474e8fc4d9f1f122bda4
+          name: Commitee
+          type: HTTP_AGENT
+          key: aut_getCommittee
+          history: 1h
+          trends: '0'
+          valuemap:
+            name: 'Boolean status'
+          preprocessing:
+            - type: JAVASCRIPT
+              parameters:
+                - |
+                  var json = JSON.parse(value);
+                  var count = 0;
+                  var valaddr = "{$VALIDATOR_ADDRESS}"
+                  for (var i = 0; i < json.result.length; i++) {
+                      if (json.result[i].addr === valaddr.toLowerCase()) {
+                          count = 1;
+                          break;
+                      }
+                  }
+                  
+                  return count;
+          url: '{$AUTONITY_RPC}'
+          posts: '{"jsonrpc":"2.0", "method":"aut_getCommittee", "params":[], "id":1}'
+          headers:
+            - name: Content-Type
+              value: application/json
+          triggers:
+            - uuid: 29fee94b367d4289a5bdd5a50c368ef2
+              expression: 'count(/Autonity/aut_getCommittee,#1,"ne",1)=1'
+              name: 'Validator is not in commitee'
+              opdata: 'Current status: {ITEM.VALUE}'
+              priority: HIGH
+              dependencies:
+                - name: 'Validator state not ACTIVE'
+                  expression: 'count(/Autonity/validator_state,#1,"ne",0)=1'
+        - uuid: 56dd707a62af480689426f021f4204ff
+          name: 'Validator info data'
+          type: HTTP_AGENT
+          key: aut_getValidator
+          history: 1h
+          trends: '0'
+          value_type: TEXT
+          url: '{$AUTONITY_RPC}'
+          posts: '{"jsonrpc":"2.0", "method":"aut_getValidator", "params":["{$VALIDATOR_ADDRESS}"], "id":1}'
+          headers:
+            - name: Content-Type
+              value: application/json
+        - uuid: 7023b11d071f4cb8a03c19ffa35e31b7
+          name: 'Total Bonded Stake'
+          type: DEPENDENT
+          key: BondedStake
+          delay: '0'
+          trends: '0'
+          value_type: FLOAT
+          units: '!NTN'
+          preprocessing:
+            - type: JSONPATH
+              parameters:
+                - $.result.bondedStake
+            - type: MULTIPLIER
+              parameters:
+                - '1.0E-18'
+          master_item:
+            key: aut_getValidator
+        - uuid: f6fc2550a2df4eda9fa2f788f1a91d67
+          name: 'Jail Release Block'
+          type: DEPENDENT
+          key: jailReleaseBlock
+          delay: '0'
+          trends: '0'
+          preprocessing:
+            - type: JSONPATH
+              parameters:
+                - $.result.jailReleaseBlock
+          master_item:
+            key: aut_getValidator
+        - uuid: 1abff82036cb491690c73dc35388c629
+          name: 'Latest block number'
+          type: HTTP_AGENT
+          key: node_last_block_number
+          trends: '0'
+          preprocessing:
+            - type: JSONPATH
+              parameters:
+                - $.result
+            - type: LTRIM
+              parameters:
+                - 0x
+            - type: HEX_TO_DECIMAL
+              parameters:
+                - ''
+          url: '{$AUTONITY_RPC}'
+          posts: '{"jsonrpc":"2.0","method":"eth_blockNumber","params":[],"id":1}'
+          headers:
+            - name: Content-Type
+              value: application/json
+          request_method: POST
+        - uuid: 791b4551462541fb9e2ee5cebdcac17a
+          name: 'Self Bonded Stake'
+          type: DEPENDENT
+          key: selfBondedStake
+          delay: '0'
+          trends: '0'
+          value_type: FLOAT
+          units: '!NTN'
+          preprocessing:
+            - type: JSONPATH
+              parameters:
+                - $.result.selfBondedStake
+            - type: MULTIPLIER
+              parameters:
+                - '1.0E-18'
+          master_item:
+            key: aut_getValidator
+        - uuid: 0bf4383ce2a34bbc9c3ee02052550370
+          name: 'Total Slashed'
+          type: DEPENDENT
+          key: totalSlashed
+          delay: '0'
+          trends: '0'
+          value_type: FLOAT
+          units: '!NTN'
+          preprocessing:
+            - type: JSONPATH
+              parameters:
+                - $.result.totalSlashed
+            - type: MULTIPLIER
+              parameters:
+                - '1.0E-18'
+          master_item:
+            key: aut_getValidator
+        - uuid: 88593803a27b48a6b3caf2bbe484afa7
+          name: 'Validator State'
+          type: DEPENDENT
+          key: validator_state
+          delay: '0'
+          trends: '0'
+          valuemap:
+            name: 'Validator state'
+          preprocessing:
+            - type: JSONPATH
+              parameters:
+                - $.result.state
+          master_item:
+            key: aut_getValidator
+          triggers:
+            - uuid: 34b47d2d56374fb0bb74b6ffef3af58b
+              expression: 'count(/Autonity/validator_state,#1,"ne",0)=1'
+              name: 'Validator state not ACTIVE'
+              opdata: 'Current status: {ITEM.VALUE}'
+              priority: HIGH
+      discovery_rules:
+        - uuid: 0738a20876c048d8899bd60ff4817b76
+          name: 'Validator info'
+          type: DEPENDENT
+          key: val_info
+          delay: '0'
+          lifetime: 0d
+          item_prototypes:
+            - uuid: e713899b6f1543beb21001a5594c1789
+              name: 'Open door points'
+              type: HTTP_AGENT
+              key: 'game_door[{#KEY}]'
+              trends: '0'
+              value_type: FLOAT
+              preprocessing:
+                - type: JSONPATH
+                  parameters:
+                    - '$[?(@.address == "{#TREASURE_ADDRESS}")].points.first()'
+              url: 'https://d3sk8vqz7pzy2a.cloudfront.net/open_the_door.json'
+              headers:
+                - name: user-agent
+                  value: curl/7.81.0
+              trigger_prototypes:
+                - uuid: 3390697d4e224654b9321211d904eccc
+                  expression: 'last(/Autonity/game_door[{#KEY}])-last(/Autonity/game_door[{#KEY}],#1800)=0'
+                  name: 'Open door points not increase in last 30 hours'
+                  status: DISABLED
+                  priority: WARNING
+            - uuid: c6a3930858d04fa4ab29b96dff5ca792
+              name: 'Go flow points'
+              type: HTTP_AGENT
+              key: 'game_flow[{#KEY}]'
+              trends: '0'
+              value_type: FLOAT
+              preprocessing:
+                - type: JSONPATH
+                  parameters:
+                    - '$[?(@.address == "{#TREASURE_ADDRESS}")].points.first()'
+              url: 'https://d3sk8vqz7pzy2a.cloudfront.net/go_with_the_flow.json'
+              headers:
+                - name: user-agent
+                  value: curl/7.81.0
+              trigger_prototypes:
+                - uuid: e580a48208714d098a6dac7f6cbbd73d
+                  expression: 'last(/Autonity/game_flow[{#KEY}])-last(/Autonity/game_flow[{#KEY}],#150)=0'
+                  name: 'Go with flow points not increase in last 2 hours'
+                  priority: WARNING
+            - uuid: 33b1b0d549e14c189816c913c563d9fe
+              name: 'Onboard points'
+              type: HTTP_AGENT
+              key: 'game_onboard[{#KEY}]'
+              trends: '0'
+              value_type: FLOAT
+              preprocessing:
+                - type: JSONPATH
+                  parameters:
+                    - '$[?(@.address == "{#TREASURE_ADDRESS}")].points.first()'
+              url: 'https://d3sk8vqz7pzy2a.cloudfront.net/onboard_a_validator.json'
+              headers:
+                - name: user-agent
+                  value: curl/7.81.0
+            - uuid: 2af3b007cb1547fd841120490310f4b7
+              name: 'PnL points'
+              type: HTTP_AGENT
+              key: 'game_pnl[{#KEY}]'
+              trends: '0'
+              value_type: FLOAT
+              preprocessing:
+                - type: JSONPATH
+                  parameters:
+                    - '$[?(@.address == "{#TREASURE_ADDRESS}")].points.first()'
+                - type: MULTIPLIER
+                  parameters:
+                    - '1.0E-18'
+              url: 'https://d3sk8vqz7pzy2a.cloudfront.net/pnls.json'
+              headers:
+                - name: user-agent
+                  value: curl/7.81.0
+            - uuid: 55ea3eb61b544426ae9e4d4228cf0a88
+              name: 'Node p2p port status'
+              type: SIMPLE
+              key: 'net.tcp.service[tcp,{#IP_ADDRESS},{#PORT}]'
+              trends: '0'
+              valuemap:
+                name: 'Service staus'
+            - uuid: 8ebdfbec50a7447c9eedbb7fe198135f
+              name: 'Oracle ATN balance'
+              type: HTTP_AGENT
+              key: 'oracle_atn_balance[{#KEY}]'
+              trends: '0'
+              value_type: FLOAT
+              units: '!ATN'
+              preprocessing:
+                - type: JAVASCRIPT
+                  parameters:
+                    - |
+                      var jsonData = JSON.parse(value);
+                      var decValue = parseInt(jsonData.result, 16);
+                      return decValue * 1.0e-18;
+              url: '{$AUTONITY_RPC}'
+              posts: '{"jsonrpc":"2.0", "method":"eth_getBalance", "params":["{#ORACLE_ADDRESS}","latest"], "id":1}'
+              headers:
+                - name: Content-Type
+                  value: application/json
+            - uuid: 7b7040d4ea734a77989254f37850a88b
+              name: 'Treasure ATN balance'
+              type: HTTP_AGENT
+              key: 'treasure_atn_balance[{#KEY}]'
+              trends: '0'
+              value_type: FLOAT
+              units: '!ATN'
+              preprocessing:
+                - type: JAVASCRIPT
+                  parameters:
+                    - |
+                      var jsonData = JSON.parse(value);
+                      var decValue = parseInt(jsonData.result, 16);
+                      return decValue * 1.0e-18;
+              url: '{$AUTONITY_RPC}'
+              posts: '{"jsonrpc":"2.0", "method":"eth_getBalance", "params":["{#TREASURE_ADDRESS}","latest"], "id":1}'
+              headers:
+                - name: Content-Type
+                  value: application/json
+          master_item:
+            key: aut_getValidator
+          preprocessing:
+            - type: JAVASCRIPT
+              parameters:
+                - |
+                  var obj = JSON.parse(value);
+                  const enodeString = obj["result"]["enode"];
+                  const ipAddressPortMatch = enodeString.match(/\/\/.*@([^:]+):(\d+)/);
+                  const ipAddress = ipAddressPortMatch ? ipAddressPortMatch[1] : null;
+                  const port = ipAddressPortMatch ? ipAddressPortMatch[2] : null;
+                  const result = {
+                    "data": [
+                      {
+                        "{#TREASURE_ADDRESS}": obj["result"]["treasury"],
+                        "{#ORACLE_ADDRESS}": obj["result"]["oracleAddress"],
+                        "{#ENODE}": enodeString,
+                        "{#KEY}": 'key',
+                        "{#IP_ADDRESS}": ipAddress,
+                        "{#PORT}": port
+                      }
+                    ]
+                  };
+                  
+                  return JSON.stringify(result);
+      macros:
+        - macro: '{$AUTONITY_RPC}'
+          value: 'https://rpc1.piccadilly.autonity.org'
+        - macro: '{$VALIDATOR_ADDRESS}'
+      valuemaps:
+        - uuid: b02fc86f87cc4e55987b0e161f83849d
+          name: 'Boolean status'
+          mappings:
+            - value: '0'
+              newvalue: 'False'
+            - value: '1'
+              newvalue: 'True'
+        - uuid: 766b6d0701b1408f9094de3195e3b0b9
+          name: 'Service staus'
+          mappings:
+            - value: '1'
+              newvalue: Up
+            - value: '0'
+              newvalue: Down
+        - uuid: 896de65393244cc68ac14181316e6ec8
+          name: 'Validator state'
+          mappings:
+            - value: '0'
+              newvalue: Active
+            - value: '1'
+              newvalue: Paused
+            - value: '2'
+              newvalue: Jailed
+  triggers:
+    - uuid: 132103a9253f426dbd47f3baa9c20239
+      expression: 'last(/Autonity/jailReleaseBlock) < last(/Autonity/node_last_block_number) and last(/Autonity/validator_state)=2'
+      name: 'Jail release block passed, validator can be unjailed'
+      opdata: 'Jail release block: {ITEM.VALUE1} Current block: {ITEM.VALUE2}'
+      priority: INFO
