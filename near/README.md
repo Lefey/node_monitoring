@@ -7,3 +7,5 @@ Macros description:
 | --- | --- | --- | --- |
 | `{$VALIDATOR_POOL}` | Empty | Yes | Near validator stake pool adress, for example myvalidator.pool.near |
 | `{$NODE_RPC_ADDRESS}` | Empty | Yes | Near RPC node adress (http://ip:port or https URL), you can use your own node here |
+
+<picture> <img align="left" src="https://github.com/Lefey/Lefey/raw/main/img/stakewars_dashboard.jpg"></picture>
