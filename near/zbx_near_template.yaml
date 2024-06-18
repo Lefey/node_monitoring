@@ -1,0 +1,524 @@
+zabbix_export:
+  version: '7.0'
+  template_groups:
+    - uuid: 14813a0c9112429a8a1da78a1f6efc12
+      name: Nodes
+  templates:
+    - uuid: a80b98412665413f84911b10d61da3e2
+      template: Near
+      name: Near
+      groups:
+        - name: Nodes
+      items:
+        - uuid: 69b3fdba72904c718c5e1516587b9b63
+          name: 'Earliest block height'
+          type: DEPENDENT
+          key: earliest_block_height
+          delay: '0'
+          history: 1h
+          trends: '0'
+          preprocessing:
+            - type: JSONPATH
+              parameters:
+                - $.result.sync_info.earliest_block_height
+          master_item:
+            key: node_status
+        - uuid: 5d0662317ca84648a56c49cfde14c374
+          name: 'Latest block height'
+          type: DEPENDENT
+          key: latest_block_height
+          delay: '0'
+          history: 90d
+          trends: '0'
+          preprocessing:
+            - type: JSONPATH
+              parameters:
+                - $.result.sync_info.latest_block_height
+          master_item:
+            key: node_status
+        - uuid: f3006f1d34c74ba5a1f4b65decc0dd50
+          name: 'Latest block timestamp'
+          type: DEPENDENT
+          key: latest_block_timestamp
+          delay: '0'
+          history: 1d
+          trends: '0'
+          units: unixtime
+          preprocessing:
+            - type: JSONPATH
+              parameters:
+                - $.result.sync_info.latest_block_time
+            - type: JAVASCRIPT
+              parameters:
+                - 'return parseInt(Date.parse(value) / 1000)'
+          master_item:
+            key: node_status
+        - uuid: 723006a0bab04ad3b00530f0dc58b977
+          name: 'Network info'
+          type: HTTP_AGENT
+          key: network_info
+          history: 1h
+          trends: '0'
+          value_type: TEXT
+          timeout: 5s
+          url: '{$NODE_RPC_ADDRESS}'
+          posts: '{"method": "network_info", "params": [null],"id":1,"jsonrpc":"2.0"}'
+          headers:
+            - name: Content-Type
+              value: application/json
+          request_method: POST
+        - uuid: b4115ee5a62e4bf192210d05fcdda6ed
+          name: 'Node status'
+          type: HTTP_AGENT
+          key: node_status
+          history: 1h
+          trends: '0'
+          value_type: TEXT
+          timeout: 3s
+          url: '{$NODE_RPC_ADDRESS}'
+          posts: '{"method": "status", "params": [null],"id":1,"jsonrpc":"2.0"}'
+          headers:
+            - name: Content-Type
+              value: application/json
+          request_method: POST
+          triggers:
+            - uuid: 9d3f194b14f546afbdb10370c80d22e4
+              expression: 'nodata(/Near/node_status,600)=1'
+              name: 'Can`t get data from node RPC'
+              opdata: 'No data from node RPC in last 10min'
+              priority: HIGH
+        - uuid: ff79870de6c74a389e75646e2f18417c
+          name: 'Node syncing'
+          type: DEPENDENT
+          key: node_syncing
+          delay: '0'
+          history: 90d
+          trends: '0'
+          valuemap:
+            name: 'Boolean status'
+          preprocessing:
+            - type: JSONPATH
+              parameters:
+                - $.result.sync_info.syncing
+            - type: BOOL_TO_DECIMAL
+              parameters:
+                - ''
+          master_item:
+            key: node_status
+          triggers:
+            - uuid: f6705dba03ce467c9737ea5be752038e
+              expression: 'count(/Near/node_syncing,#3,"eq",1)=3'
+              recovery_mode: RECOVERY_EXPRESSION
+              recovery_expression: 'count(/Near/node_syncing,#3,"eq",0)=3'
+              name: 'Node is syncing to actual height'
+              opdata: 'Syncing={ITEM.LASTVALUE}'
+              priority: WARNING
+        - uuid: 3b8009dec931450e90f44f2deb199220
+          name: 'Node version'
+          type: DEPENDENT
+          key: node_version
+          delay: '0'
+          history: 1d
+          trends: '0'
+          value_type: CHAR
+          preprocessing:
+            - type: JSONPATH
+              parameters:
+                - $.result.version.build
+          master_item:
+            key: node_status
+        - uuid: 636b823134c048a5bd4b2bfb6fd80d1e
+          name: 'Node peers'
+          type: DEPENDENT
+          key: num_peers
+          delay: '0'
+          history: 90d
+          trends: '0'
+          units: peers
+          preprocessing:
+            - type: JSONPATH
+              parameters:
+                - $.result.num_active_peers
+          master_item:
+            key: network_info
+        - uuid: b9a67d2bfaa94c6a860fa42713e5f97b
+          name: 'Validators info'
+          type: HTTP_AGENT
+          key: validators_info
+          history: 1h
+          trends: '0'
+          value_type: TEXT
+          preprocessing:
+            - type: JSONPATH
+              parameters:
+                - $.result
+          timeout: 5s
+          url: '{$NODE_RPC_ADDRESS}'
+          posts: '{"method": "validators", "params": [null],"id":1,"jsonrpc":"2.0"}'
+          headers:
+            - name: Content-Type
+              value: application/json
+          request_method: POST
+        - uuid: 1db269df3e7047b88bcf41e8a6cce20a
+          name: 'Validator stake'
+          type: HTTP_AGENT
+          key: validator_stake
+          history: 1h
+          trends: '0'
+          value_type: FLOAT
+          preprocessing:
+            - type: JSONPATH
+              parameters:
+                - $.result.locked
+            - type: MULTIPLIER
+              parameters:
+                - '1.0E-24'
+          timeout: 5s
+          url: 'https://rpc.statelessnet.nearone.org'
+          posts: '{"method": "query", "params": {"request_type": "view_account","finality": "final","account_id": "{$VALIDATOR_POOL}"},"id":1,"jsonrpc":"2.0"}'
+          headers:
+            - name: Content-Type
+              value: application/json
+          request_method: POST
+        - uuid: 5ce7e04f58ee4dba979254d65f329d4b
+          name: 'Validator status'
+          type: DEPENDENT
+          key: validator_status
+          delay: '0'
+          history: 90d
+          trends: '0'
+          valuemap:
+            name: 'Validator status'
+          preprocessing:
+            - type: JAVASCRIPT
+              parameters:
+                - |
+                  var validatorPool = '{$VALIDATOR_POOL}'; // Macro for validator account ID
+                  
+                  try {
+                      var response = JSON.parse(value); // Parse the JSON response
+                      
+                      var currentValidators = response.current_validators || [];
+                      var currentProposals = response.current_proposals || [];
+                      var prevEpochKickout = response.prev_epoch_kickout || [];
+                      var nextEpochValidators = response.next_validators || [];
+                  
+                      var foundInCurrent = currentValidators.some(function(validator) {
+                          return validator.account_id === validatorPool;
+                      });
+                  
+                      var foundInProposals = currentProposals.some(function(validator) {
+                          return validator.account_id === validatorPool;
+                      });
+                  
+                      var foundInPrevKickout = prevEpochKickout.some(function(validator) {
+                          return validator.account_id === validatorPool;
+                      });
+                  
+                      var foundInNext = nextEpochValidators.some(function(validator) {
+                          return validator.account_id === validatorPool;
+                      });
+                  
+                      if (foundInProposals && !foundInCurrent && !foundInNext) {
+                          return 5;
+                      } else if (!foundInCurrent && foundInNext) {
+                          return 4;
+                      } else if (!foundInProposals && foundInPrevKickout && !foundInCurrent && !foundInNext) {
+                          return 3;
+                      } else if (foundInCurrent && foundInPrevKickout && !foundInNext) {
+                          return 2;
+                      } else if (foundInCurrent && !foundInPrevKickout && foundInNext) {
+                          return 1;
+                      } else if (!foundInCurrent && !foundInPrevKickout && !foundInNext && !foundInProposals){
+                          return 0;
+                      }
+                  } catch (e) {
+                      // If there's any error in parsing or processing, return 99
+                      return 99;
+                  }
+          master_item:
+            key: validators_info
+          triggers:
+            - uuid: e54c389e59634df39f21a44de4673ec5
+              expression: 'last(/Near/validator_status)<>1 and last(/Near/validator_status)<>2'
+              name: 'Validator status INACTIVE'
+              opdata: 'Current validator status: {ITEM.VALUE}'
+              priority: HIGH
+              manual_close: 'YES'
+      discovery_rules:
+        - uuid: cbee90769e884520ad613afa76567157
+          name: 'Epoch kickout'
+          type: DEPENDENT
+          key: epoch_kickout
+          delay: '0'
+          filter:
+            conditions:
+              - macro: '{#POOL}'
+                value: '{$VALIDATOR_POOL}'
+                formulaid: A
+          lifetime_type: DELETE_IMMEDIATELY
+          lifetime: '0'
+          item_prototypes:
+            - uuid: b8b17090fc2e489ca07e97a06edc3568
+              name: 'Kickout reason'
+              type: DEPENDENT
+              key: 'kickout_reason[{#POOL}]'
+              delay: '0'
+              history: 1d
+              trends: '0'
+              value_type: TEXT
+              preprocessing:
+                - type: JSONPATH
+                  parameters:
+                    - '$.prev_epoch_kickout[?(@.account_id == "{$VALIDATOR_POOL}")].reason.first()'
+              master_item:
+                key: validators_info
+          trigger_prototypes:
+            - uuid: 5a5a32ada97442288caf6a07cb8c66eb
+              expression: 'length(last(/Near/kickout_reason[{#POOL}]))<>0 and last(/Near/validator_status)=2'
+              name: 'Validator kickout expected'
+              opdata: 'Kickout reason: {ITEM.VALUE}'
+              priority: INFO
+          master_item:
+            key: validators_info
+          preprocessing:
+            - type: JSONPATH
+              parameters:
+                - $.prev_epoch_kickout
+            - type: JAVASCRIPT
+              parameters:
+                - |
+                  var array = JSON.parse(value);
+                  
+                  if (!Array.isArray(array)) {
+                      throw new Error("Parsed value is not an array");
+                  }
+                  
+                  var outputItems = [];
+                  
+                  for (var x = 0; x < array.length; x++) {
+                              outputItems.push({
+                                  "{#POOL}": array[x].account_id,
+                                  "{#KEY}": "key"
+                              });
+                  }
+                  
+                  return JSON.stringify({ "data": outputItems });
+        - uuid: cc2f33a3e174424c88412babe098e51e
+          name: Validators
+          type: DEPENDENT
+          key: validators
+          delay: '0'
+          filter:
+            conditions:
+              - macro: '{#POOL}'
+                value: '{$VALIDATOR_POOL}'
+                formulaid: A
+          lifetime_type: DELETE_NEVER
+          lifetime: '0'
+          item_prototypes:
+            - uuid: a5a6be4205774bea9e61540a2c4b1e41
+              name: 'Expected blocks'
+              type: DEPENDENT
+              key: 'num_expected_blocks[{#POOL}]'
+              delay: '0'
+              trends: '0'
+              preprocessing:
+                - type: JSONPATH
+                  parameters:
+                    - '$.current_validators[?(@.account_id == "{$VALIDATOR_POOL}")].num_expected_blocks.first()'
+              master_item:
+                key: validators_info
+            - uuid: 88a43833ed984a849bc35e54008418f2
+              name: 'Expected chunks'
+              type: DEPENDENT
+              key: 'num_expected_chunks[{#POOL}]'
+              delay: '0'
+              trends: '0'
+              preprocessing:
+                - type: JSONPATH
+                  parameters:
+                    - '$.current_validators[?(@.account_id == "{$VALIDATOR_POOL}")].num_expected_chunks.first()'
+              master_item:
+                key: validators_info
+            - uuid: a74ca27764cf4dafb2313f9ae306bc3a
+              name: 'Expected endorsements'
+              type: DEPENDENT
+              key: 'num_expected_endorsements[{#POOL}]'
+              delay: '0'
+              trends: '0'
+              preprocessing:
+                - type: JSONPATH
+                  parameters:
+                    - '$.current_validators[?(@.account_id == "{$VALIDATOR_POOL}")].num_expected_endorsements.first()'
+              master_item:
+                key: validators_info
+            - uuid: a41623b793fc40649db06a275e741712
+              name: 'Produced blocks'
+              type: DEPENDENT
+              key: 'num_produced_blocks[{#POOL}]'
+              delay: '0'
+              trends: '0'
+              preprocessing:
+                - type: JSONPATH
+                  parameters:
+                    - '$.current_validators[?(@.account_id == "{$VALIDATOR_POOL}")].num_produced_blocks.first()'
+              master_item:
+                key: validators_info
+            - uuid: da694d879e2d48edbfa5579daf648cd6
+              name: 'Produced chunks'
+              type: DEPENDENT
+              key: 'num_produced_chunks[{#POOL}]'
+              delay: '0'
+              trends: '0'
+              preprocessing:
+                - type: JSONPATH
+                  parameters:
+                    - '$.current_validators[?(@.account_id == "{$VALIDATOR_POOL}")].num_produced_chunks.first()'
+              master_item:
+                key: validators_info
+            - uuid: 673050dc87634cb8a4ce42bb0951d8e2
+              name: 'Produced endorsements'
+              type: DEPENDENT
+              key: 'num_produced_endorsements[{#POOL}]'
+              delay: '0'
+              trends: '0'
+              preprocessing:
+                - type: JSONPATH
+                  parameters:
+                    - '$.current_validators[?(@.account_id == "{$VALIDATOR_POOL}")].num_produced_endorsements.first()'
+              master_item:
+                key: validators_info
+            - uuid: 44412df1a60c446db53f51d1de237883
+              name: 'Validator position'
+              type: DEPENDENT
+              key: 'validator_position[{#POOL}]'
+              delay: '0'
+              trends: '0'
+              preprocessing:
+                - type: JAVASCRIPT
+                  parameters:
+                    - |
+                      var json = JSON.parse(value);
+                      json.current_validators.sort(function(a, b) {
+                          const aValue = a.stake;
+                          const bValue = b.stake;
+                          if (aValue.length !== bValue.length) {
+                              return bValue.length - aValue.length;
+                          }
+                          // If lengths are the same, perform lexicographic (string) comparison
+                          if (aValue > bValue) {
+                              return -1;  // a should come before b in the sorted order
+                          } else if (aValue < bValue) {
+                              return 1;   // a should come after b in the sorted order
+                          } else {
+                              return 0;   // a and b are equal, so their order doesn't matter
+                          }
+                      });
+                      var position = -1; // Default value, assuming the address is not found
+                      for (var i = 0; i < json.current_validators.length; i++) {
+                          if (json.current_validators[i].account_id === "{$VALIDATOR_POOL}") {
+                              position = i+1;
+                              break;
+                          }
+                      }
+                      return position;
+              master_item:
+                key: validators_info
+            - uuid: 27249ff12ef74e20a6c1c3e99c61e931
+              name: 'Validator slashed'
+              type: DEPENDENT
+              key: 'validator_slashed[{#POOL}]'
+              delay: '0'
+              trends: '0'
+              valuemap:
+                name: 'Boolean status'
+              preprocessing:
+                - type: JSONPATH
+                  parameters:
+                    - '$.current_validators[?(@.account_id == "{$VALIDATOR_POOL}")].is_slashed.first()'
+                - type: BOOL_TO_DECIMAL
+                  parameters:
+                    - ''
+              master_item:
+                key: validators_info
+              trigger_prototypes:
+                - uuid: 05a97855c61f49b6b4f114d17a001b16
+                  expression: 'count(/Near/validator_slashed[{#POOL}],#1,"eq",1)=1'
+                  name: 'Validator slashed'
+                  priority: DISASTER
+            - uuid: cb0f8ec039174c09abf65910688f7f89
+              name: 'Validator uptime'
+              type: CALCULATED
+              key: 'validator_uptime[{#POOL}]'
+              trends: '0'
+              units: '%'
+              params: '100*(last(//num_produced_chunks[{#POOL}])+last(//num_produced_blocks[{#POOL}]))/(last(//num_expected_chunks[{#POOL}])+last(//num_expected_blocks[{#POOL}]))'
+          master_item:
+            key: validators_info
+          preprocessing:
+            - type: JSONPATH
+              parameters:
+                - $.current_validators
+            - type: JAVASCRIPT
+              parameters:
+                - |
+                  var array = JSON.parse(value);
+                  
+                  if (!Array.isArray(array)) {
+                      throw new Error("Parsed value is not an array");
+                  }
+                  
+                  var outputItems = [];
+                  
+                  for (var x = 0; x < array.length; x++) {
+                              outputItems.push({
+                                  "{#POOL}": array[x].account_id,
+                                  "{#KEY}": "key"
+                              });
+                  }
+                  
+                  return JSON.stringify({ "data": outputItems });
+      macros:
+        - macro: '{$NODE_RPC_ADDRESS}'
+          description: 'Node RPC address (ip:port or https link) example: http://1.2.3.4:3030'
+        - macro: '{$VALIDATOR_POOL}'
+          description: 'Validator pool address (example: lefey.pool.statelessnet)'
+      valuemaps:
+        - uuid: 52b3d8b9ffbb457788e2a01842386b9b
+          name: 'Boolean status'
+          mappings:
+            - value: '0'
+              newvalue: 'False'
+            - value: '1'
+              newvalue: 'True'
+        - uuid: becd9bef3c774d02b55380e288334639
+          name: 'Service staus'
+          mappings:
+            - value: '0'
+              newvalue: Down
+            - value: '1'
+              newvalue: Up
+        - uuid: a4494a02c2c54b66b3f5a81961674ea0
+          name: 'Validator status'
+          mappings:
+            - value: '0'
+              newvalue: Inactive
+            - value: '1'
+              newvalue: Active
+            - value: '2'
+              newvalue: Kickout
+            - value: '3'
+              newvalue: Kicked
+            - value: '4'
+              newvalue: Joining
+            - value: '5'
+              newvalue: Proposal
+            - value: '99'
+              newvalue: ERROR
+  triggers:
+    - uuid: ce19235960394c8ab8109c6cc843864d
+      expression: 'changecount(/Near/latest_block_height,10m)=0 and last(/Near/latest_block_timestamp)<>0'
+      name: 'No new blocks produced since {ITEM.LASTVALUE2}'
+      opdata: 'Latest block height: {ITEM.LASTVALUE1} Latest block timestamp: {ITEM.LASTVALUE2}'
+      priority: WARNING
