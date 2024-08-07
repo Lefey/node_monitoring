@@ -1,5 +1,5 @@
 zabbix_export:
-  version: '6.4'
+  version: '7.0'
   template_groups:
     - uuid: 14813a0c9112429a8a1da78a1f6efc12
       name: Nodes
@@ -33,6 +33,7 @@ zabbix_export:
                   }
                   
                   return count;
+          timeout: 3s
           url: '{$AUTONITY_RPC}'
           posts: '{"jsonrpc":"2.0", "method":"aut_getCommittee", "params":[], "id":1}'
           headers:
@@ -52,8 +53,8 @@ zabbix_export:
           type: HTTP_AGENT
           key: aut_getValidator
           history: 1h
-          trends: '0'
           value_type: TEXT
+          timeout: 3s
           url: '{$AUTONITY_RPC}'
           posts: '{"jsonrpc":"2.0", "method":"aut_getValidator", "params":["{$VALIDATOR_ADDRESS}"], "id":1}'
           headers:
@@ -63,9 +64,9 @@ zabbix_export:
           name: 'Total Bonded Stake'
           type: DEPENDENT
           key: BondedStake
-          delay: '0'
-          trends: '0'
+          history: 90d
           value_type: FLOAT
+          trends: '0'
           units: '!NTN'
           preprocessing:
             - type: JSONPATH
@@ -80,7 +81,7 @@ zabbix_export:
           name: 'Jail Release Block'
           type: DEPENDENT
           key: jailReleaseBlock
-          delay: '0'
+          history: 90d
           trends: '0'
           preprocessing:
             - type: JSONPATH
@@ -88,10 +89,45 @@ zabbix_export:
                 - $.result.jailReleaseBlock
           master_item:
             key: aut_getValidator
+        - uuid: e1ae5b9d0ef14620b1a1c72fc039622e
+          name: Latitude
+          type: CALCULATED
+          key: latitude
+          history: 1d
+          value_type: FLOAT
+          trends: '0'
+          params: 'last(//location[key])'
+          inventory_link: LOCATION_LAT
+          preprocessing:
+            - type: JSONPATH
+              parameters:
+                - $.loc
+            - type: REGEX
+              parameters:
+                - '^(-?\d+(?:\.\d+)?),(-?\d+(?:\.\d+)?)$'
+                - \1
+        - uuid: 9afded0f34dd41429737cd4589e960a2
+          name: Longitude
+          type: CALCULATED
+          key: longitude
+          history: 1d
+          value_type: FLOAT
+          trends: '0'
+          params: 'last(//location[key])'
+          inventory_link: LOCATION_LON
+          preprocessing:
+            - type: JSONPATH
+              parameters:
+                - $.loc
+            - type: REGEX
+              parameters:
+                - '^(-?\d+(?:\.\d+)?),(-?\d+(?:\.\d+)?)$'
+                - \2
         - uuid: 1abff82036cb491690c73dc35388c629
           name: 'Latest block number'
           type: HTTP_AGENT
           key: node_last_block_number
+          history: 90d
           trends: '0'
           preprocessing:
             - type: JSONPATH
@@ -101,8 +137,7 @@ zabbix_export:
               parameters:
                 - 0x
             - type: HEX_TO_DECIMAL
-              parameters:
-                - ''
+          timeout: 3s
           url: '{$AUTONITY_RPC}'
           posts: '{"jsonrpc":"2.0","method":"eth_blockNumber","params":[],"id":1}'
           headers:
@@ -113,9 +148,9 @@ zabbix_export:
           name: 'Self Bonded Stake'
           type: DEPENDENT
           key: selfBondedStake
-          delay: '0'
-          trends: '0'
+          history: 90d
           value_type: FLOAT
+          trends: '0'
           units: '!NTN'
           preprocessing:
             - type: JSONPATH
@@ -130,9 +165,9 @@ zabbix_export:
           name: 'Total Slashed'
           type: DEPENDENT
           key: totalSlashed
-          delay: '0'
-          trends: '0'
+          history: 90d
           value_type: FLOAT
+          trends: '0'
           units: '!NTN'
           preprocessing:
             - type: JSONPATH
@@ -143,11 +178,23 @@ zabbix_export:
                 - '1.0E-18'
           master_item:
             key: aut_getValidator
+        - uuid: 14326b36713b42d2953a05adb150c850
+          name: 'Validator provableFaultCount'
+          type: DEPENDENT
+          key: validator_provableFaultCount
+          history: 90d
+          trends: '0'
+          preprocessing:
+            - type: JSONPATH
+              parameters:
+                - $.result.provableFaultCount
+          master_item:
+            key: aut_getValidator
         - uuid: 88593803a27b48a6b3caf2bbe484afa7
           name: 'Validator State'
           type: DEPENDENT
           key: validator_state
-          delay: '0'
+          history: 90d
           trends: '0'
           valuemap:
             name: 'Validator state'
@@ -168,21 +215,24 @@ zabbix_export:
           name: 'Validator info'
           type: DEPENDENT
           key: val_info
-          delay: '0'
-          lifetime: 0d
+          lifetime_type: DELETE_IMMEDIATELY
           item_prototypes:
             - uuid: e713899b6f1543beb21001a5594c1789
               name: 'Open door points'
               type: HTTP_AGENT
               key: 'game_door[{#KEY}]'
-              trends: '0'
+              history: 90d
               value_type: FLOAT
+              trends: '0'
               preprocessing:
                 - type: JSONPATH
                   parameters:
                     - '$[?(@.address == "{#TREASURE_ADDRESS}")].points.first()'
+              timeout: 3s
               url: 'https://d3sk8vqz7pzy2a.cloudfront.net/open_the_door.json'
               headers:
+                - name: Accept-Encoding
+                  value: identity
                 - name: user-agent
                   value: curl/7.81.0
               trigger_prototypes:
@@ -191,45 +241,13 @@ zabbix_export:
                   name: 'Open door points not increase in last 30 hours'
                   status: DISABLED
                   priority: WARNING
-            - uuid: c6a3930858d04fa4ab29b96dff5ca792
-              name: 'Go flow points'
-              type: HTTP_AGENT
-              key: 'game_flow[{#KEY}]'
-              trends: '0'
-              value_type: FLOAT
-              preprocessing:
-                - type: JSONPATH
-                  parameters:
-                    - '$[?(@.address == "{#TREASURE_ADDRESS}")].points.first()'
-              url: 'https://d3sk8vqz7pzy2a.cloudfront.net/go_with_the_flow.json'
-              headers:
-                - name: user-agent
-                  value: curl/7.81.0
-              trigger_prototypes:
-                - uuid: e580a48208714d098a6dac7f6cbbd73d
-                  expression: 'last(/Autonity/game_flow[{#KEY}])-last(/Autonity/game_flow[{#KEY}],#150)=0'
-                  name: 'Go with flow points not increase in last 2 hours'
-                  priority: WARNING
-            - uuid: 33b1b0d549e14c189816c913c563d9fe
-              name: 'Onboard points'
-              type: HTTP_AGENT
-              key: 'game_onboard[{#KEY}]'
-              trends: '0'
-              value_type: FLOAT
-              preprocessing:
-                - type: JSONPATH
-                  parameters:
-                    - '$[?(@.address == "{#TREASURE_ADDRESS}")].points.first()'
-              url: 'https://d3sk8vqz7pzy2a.cloudfront.net/onboard_a_validator.json'
-              headers:
-                - name: user-agent
-                  value: curl/7.81.0
             - uuid: 2af3b007cb1547fd841120490310f4b7
               name: 'PnL points'
               type: HTTP_AGENT
               key: 'game_pnl[{#KEY}]'
-              trends: '0'
+              history: 90d
               value_type: FLOAT
+              trends: '0'
               preprocessing:
                 - type: JSONPATH
                   parameters:
@@ -237,14 +255,42 @@ zabbix_export:
                 - type: MULTIPLIER
                   parameters:
                     - '1.0E-18'
+              timeout: 3s
               url: 'https://d3sk8vqz7pzy2a.cloudfront.net/pnls.json'
               headers:
+                - name: Accept-Encoding
+                  value: identity
                 - name: user-agent
                   value: curl/7.81.0
+            - uuid: 9d55b66bbfd44f578d62c98c57478ed6
+              name: 'Hosting provider'
+              type: DEPENDENT
+              key: 'hosting[{#KEY}]'
+              history: 1d
+              value_type: CHAR
+              preprocessing:
+                - type: JSONPATH
+                  parameters:
+                    - $.org
+              master_item:
+                key: 'location[{#KEY}]'
+            - uuid: c4f66deddcf0489ca17f3969c931479d
+              name: Geolocation
+              type: HTTP_AGENT
+              key: 'location[{#KEY}]'
+              delay: 1d
+              history: 1h
+              value_type: TEXT
+              timeout: 3s
+              url: 'https://ipinfo.io/{#IP_ADDRESS}'
+              headers:
+                - name: Authorization
+                  value: 'Bearer 670954378242fb'
             - uuid: 55ea3eb61b544426ae9e4d4228cf0a88
               name: 'Node p2p port status'
               type: SIMPLE
               key: 'net.tcp.service[tcp,{#IP_ADDRESS},{#PORT}]'
+              history: 90d
               trends: '0'
               valuemap:
                 name: 'Service staus'
@@ -252,8 +298,9 @@ zabbix_export:
               name: 'Oracle ATN balance'
               type: HTTP_AGENT
               key: 'oracle_atn_balance[{#KEY}]'
-              trends: '0'
+              history: 90d
               value_type: FLOAT
+              trends: '0'
               units: '!ATN'
               preprocessing:
                 - type: JAVASCRIPT
@@ -262,6 +309,7 @@ zabbix_export:
                       var jsonData = JSON.parse(value);
                       var decValue = parseInt(jsonData.result, 16);
                       return decValue * 1.0e-18;
+              timeout: 3s
               url: '{$AUTONITY_RPC}'
               posts: '{"jsonrpc":"2.0", "method":"eth_getBalance", "params":["{#ORACLE_ADDRESS}","latest"], "id":1}'
               headers:
@@ -271,8 +319,9 @@ zabbix_export:
               name: 'Treasure ATN balance'
               type: HTTP_AGENT
               key: 'treasure_atn_balance[{#KEY}]'
-              trends: '0'
+              history: 90d
               value_type: FLOAT
+              trends: '0'
               units: '!ATN'
               preprocessing:
                 - type: JAVASCRIPT
@@ -281,11 +330,83 @@ zabbix_export:
                       var jsonData = JSON.parse(value);
                       var decValue = parseInt(jsonData.result, 16);
                       return decValue * 1.0e-18;
+              timeout: 3s
               url: '{$AUTONITY_RPC}'
               posts: '{"jsonrpc":"2.0", "method":"eth_getBalance", "params":["{#TREASURE_ADDRESS}","latest"], "id":1}'
               headers:
                 - name: Content-Type
                   value: application/json
+            - uuid: 8153afecaddb4c269f31afffc42d110a
+              name: 'Validator moniker'
+              type: HTTP_AGENT
+              key: 'validator_moniker[{#KEY}]'
+              history: 90d
+              value_type: CHAR
+              preprocessing:
+                - type: JAVASCRIPT
+                  parameters:
+                    - |
+                      var json = JSON.parse(value);
+                      if (json.data.getValidator.moniker !== "null") {
+                      return json.data.getValidator.moniker;
+                      }
+                      return null;
+              timeout: 3s
+              url: 'https://public.adanothe.com/graphql'
+              posts: '{"query":"{getValidator(address: \"{$VALIDATOR_ADDRESS}\") {moniker}}"}'
+              headers:
+                - name: Content-Type
+                  value: application/json
+              request_method: POST
+            - uuid: ae025bcf2c0443f6acf878fc483d3213
+              name: 'Validator position'
+              type: HTTP_AGENT
+              key: 'validator_position[{#KEY}]'
+              history: 90d
+              trends: '0'
+              preprocessing:
+                - type: JAVASCRIPT
+                  parameters:
+                    - |
+                      var json = JSON.parse(value);
+                      for (var i = 0; i < json.result.length; i++) {
+                          if (json.result[i].addr === "{$VALIDATOR_ADDRESS}") {
+                              position = i + 1;
+                              return position;
+                          }
+                      }
+                      return null;
+              timeout: 3s
+              url: '{$AUTONITY_RPC}'
+              posts: '{"jsonrpc":"2.0", "method":"aut_getCommittee", "params":[], "id":1}'
+              headers:
+                - name: Content-Type
+                  value: application/json
+              request_method: POST
+            - uuid: 33b1b0d549e14c189816c913c563d9fe
+              name: 'Validator SDP'
+              type: HTTP_AGENT
+              key: 'validator_sdp[{#KEY}]'
+              history: 90d
+              trends: '0'
+              preprocessing:
+                - type: JAVASCRIPT
+                  parameters:
+                    - |
+                      var validators = JSON.parse(value);
+                      var validatorAddress = '{$VALIDATOR_ADDRESS}'.toLowerCase();
+                      for (var i = 0; i < validators.length; i++) {
+                          if (validators[i].validator_address === validatorAddress) {
+                              return validators[i].total_delegations*1.0E-18;
+                          }
+                      }
+              timeout: 3s
+              url: 'https://d3sk8vqz7pzy2a.cloudfront.net/sdp_validators.json'
+              headers:
+                - name: Accept-Encoding
+                  value: identity
+                - name: user-agent
+                  value: curl/7.81.0
           master_item:
             key: aut_getValidator
           preprocessing:
@@ -313,7 +434,7 @@ zabbix_export:
                   return JSON.stringify(result);
       macros:
         - macro: '{$AUTONITY_RPC}'
-          value: 'https://rpc1.piccadilly.autonity.org'
+          value: 'http://192.168.10.101:8645'
         - macro: '{$VALIDATOR_ADDRESS}'
       valuemaps:
         - uuid: b02fc86f87cc4e55987b0e161f83849d
@@ -327,9 +448,9 @@ zabbix_export:
           name: 'Service staus'
           mappings:
             - value: '1'
-              newvalue: Up
+              newvalue: Open
             - value: '0'
-              newvalue: Down
+              newvalue: Closed
         - uuid: 896de65393244cc68ac14181316e6ec8
           name: 'Validator state'
           mappings:
