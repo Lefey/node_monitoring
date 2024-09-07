@@ -1,0 +1,51 @@
+zabbix_export:
+  version: '7.0'
+  template_groups:
+    - uuid: 14813a0c9112429a8a1da78a1f6efc12
+      name: Nodes
+  templates:
+    - uuid: 9f704b6a4c394dd5a72316e2f9d92b45
+      template: Nubit
+      name: Nubit
+      groups:
+        - name: Nodes
+      items:
+        - uuid: 441bbc36987849e6b736b6d0813fd627
+          name: 'Node height'
+          type: HTTP_AGENT
+          key: rpc_node_latest_block_height
+          history: 1h
+          trends: '0'
+          preprocessing:
+            - type: JSONPATH
+              parameters:
+                - $.result.header.height
+          timeout: 3s
+          url: '{$NODE_RPC_ADDRESS}'
+          posts: '{"id": 1,"jsonrpc": "2.0","method": "header.LocalHead","params": []}'
+          headers:
+            - name: Content-Type
+              value: application/json
+          request_method: POST
+          triggers:
+            - uuid: 4962f33ffd864dae9a0918fecfd122f7
+              expression: 'nodata(/Nubit/rpc_node_latest_block_height,600)=1 and length({$NODE_RPC_ADDRESS})>0'
+              name: 'Failed to receive data from RPC node'
+              opdata: 'No data from RPC node in last 10min'
+              priority: HIGH
+            - uuid: 33d92141219d46fdb7fd041d5406028d
+              expression: 'rate(/Nubit/rpc_node_latest_block_height,10m)=0'
+              name: 'No new blocks produced on RPC node'
+              opdata: 'RPC node Latest block height: {ITEM.LASTVALUE}'
+              priority: WARNING
+      macros:
+        - macro: '{$NODE_RPC_ADDRESS}'
+          description: 'Node RPC address (ip:port or https link) example: http://1.2.3.4:26657'
+      valuemaps:
+        - uuid: 489cf300c4c84b819a74c4fc4f1c5024
+          name: 'Service staus'
+          mappings:
+            - value: '0'
+              newvalue: Down
+            - value: '1'
+              newvalue: Up
