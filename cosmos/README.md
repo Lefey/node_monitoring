@@ -11,4 +11,6 @@ Macros description:
 | `{$DENOM_EXPONENT}` | Empty | Yes to show validator comission and staking rewards, will automaticaly get from API, set manually on error | Denomination multiplier, example: 1.0E-6 (equal to 0.000001) |
 | `{$BOND_DENOM}` | Empty | Yes to show validator comission and staking rewards, will automaticaly get from API, set manually on error | Denom ticker, example: uatom, can be obtained using the command  `<binary_name> q staking params`|
 | `{$BALANCE_DELTA}` | 1 | No | Min wallet balance change to send notification |
-| `{$DELEGATION_DELTA}` | 1 | No | Min delegation change to send notification |
+| `{$DELEGATION_DELTA}` | 100 | No | Min delegation change to send notification |
+| `{$VOTING_POWER_PATH}` | tokens | No | Custom .tokens api path, for non-standart cosmos networks |
+| `{$VALIDATORS_API_PATH}` | Empty | No | Custom validators api path, for non-standart cosmos networks |
