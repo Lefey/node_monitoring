@@ -14,3 +14,4 @@ Macros description:
 | `{$DELEGATION_DELTA}` | 100 | No | Min delegation change to send notification |
 | `{$VOTING_POWER_PATH}` | tokens | No | Custom .tokens api path, for non-standart cosmos networks |
 | `{$VALIDATORS_API_PATH}` | Empty | No | Custom validators api path, for non-standart cosmos networks |
+<picture> <img align="left" src="https://github.com/Lefey/Lefey/raw/main/img/cosmos_dashboard.jpg"></picture>
