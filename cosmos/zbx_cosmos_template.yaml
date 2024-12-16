@@ -1,5 +1,5 @@
 zabbix_export:
-  version: '6.4'
+  version: '7.0'
   template_groups:
     - uuid: 14813a0c9112429a8a1da78a1f6efc12
       name: Nodes
@@ -12,21 +12,61 @@ zabbix_export:
       items:
         - uuid: 036c472c0fb84b5a8ea65d3f8fd162a7
           name: 'Active Validators'
-          type: HTTP_AGENT
+          type: SCRIPT
           key: active_validators
+          delay: 3m
+          history: 1h
+          trends: '0'
+          params: |
+            var apiAddress = '{$NODE_API_ADDRESS}'
+            request = new HttpRequest();
+            request.addHeader('Content-Type: application/json');
+            var validatorsPath = '{$VALIDATORS_API_PATH}'
+            if (!validatorsPath || validatorsPath == '{$VALIDATORS_'+'API_PATH}') {
+            response = request.get(apiAddress + '/cosmos/staking/v1beta1/validators?status=BOND_STATUS_BONDED&pagination.limit=500');
+            } else {
+            response = request.get(apiAddress + validatorsPath + '?status=BOND_STATUS_BONDED&pagination.limit=500');
+            }
+            if (request.getStatus() != 200) {
+                throw 'Response code for getValidatorInfo: ' + request.getStatus();
+            } else {
+            var activeValidators = JSON.parse(response).validators.length;
+            }
+            
+            return activeValidators;
+          timeout: 5s
+        - uuid: 1a83b2751583430ba29d10c123587bb7
+          name: 'API node Latest Block Height'
+          type: HTTP_AGENT
+          key: api_node_latest_block_height
           history: 1h
           trends: '0'
           preprocessing:
             - type: JSONPATH
               parameters:
-                - $.result.total
+                - $.block.header.height
           timeout: 5s
-          url: '{$NODE_RPC_ADDRESS}/validators'
+          url: '{$NODE_API_ADDRESS}/cosmos/base/tendermint/v1beta1/blocks/latest'
+          headers:
+            - name: Accept-Encoding
+              value: identity
+          triggers:
+            - uuid: 0dd4f1043f594da59b7e4a254bdd3c00
+              expression: 'nodata(/Cosmos/api_node_latest_block_height,600)=1 and length({$NODE_API_ADDRESS})>0'
+              name: 'Failed to receive data from API node'
+              opdata: 'No data from API node in last 10min'
+              priority: HIGH
+            - uuid: 30b836345b70440f911cf272774413f1
+              expression: 'rate(/Cosmos/api_node_latest_block_height,10m)=0'
+              name: 'No new blocks produced on API node'
+              opdata: 'API node Latest block height: {ITEM.LASTVALUE}'
+              priority: WARNING
         - uuid: b1b04bf0bdef4f2c8a868e072ca2181e
           name: 'Catching Up'
           type: DEPENDENT
-          key: catching-up
+          key: catching_up
           delay: '0'
+          history: 90d
           trends: '0'
           valuemap:
             name: 'Boolean status'
@@ -38,50 +78,22 @@ zabbix_export:
               parameters:
                 - ''
           master_item:
-            key: rpc-status
+            key: rpc_status
           triggers:
             - uuid: cebdcef3de814b17baf2ec25d93525fe
-              expression: 'count(/Cosmos/catching-up,#3,"eq",1)=3'
+              expression: 'count(/Cosmos/catching_up,#3,"eq",1)=3'
               recovery_mode: RECOVERY_EXPRESSION
-              recovery_expression: 'count(/Cosmos/catching-up,#3,"eq",0)=3'
-              name: 'Node is catching up'
+              recovery_expression: 'count(/Cosmos/catching_up,#3,"eq",0)=3'
+              name: 'Node is catching up to actual height'
               opdata: 'SyncInfo.catching_up={ITEM.LASTVALUE}'
               priority: WARNING
-        - uuid: 836275cfe0fe4ba0b17b3eb66c94f326
-          name: 'Earliest_Block Height'
-          type: DEPENDENT
-          key: earliest-block-height
-          delay: '0'
-          trends: '0'
-          preprocessing:
-            - type: JSONPATH
-              parameters:
-                - $.result.sync_info.earliest_block_height
-            - type: JAVASCRIPT
-              parameters:
-                - 'return parseInt(value)'
-          master_item:
-            key: rpc-status
-        - uuid: 7390b7a453384a6a9ee8a88de28a2376
-          name: 'Latest Block Height'
-          type: DEPENDENT
-          key: latest-block-height
-          delay: '0'
-          trends: '0'
-          preprocessing:
-            - type: JSONPATH
-              parameters:
-                - $.result.sync_info.latest_block_height
-            - type: JAVASCRIPT
-              parameters:
-                - 'return parseInt(value)'
-          master_item:
-            key: rpc-status
+              manual_close: 'YES'
         - uuid: a05d7d8b4b6346ddbb488f738370d99d
-          name: 'Latest Block Timestamp'
+          name: 'RPC node Latest Block Timestamp'
           type: DEPENDENT
-          key: latest-block-timestamp
+          key: latest_block_timestamp
           delay: '0'
+          history: 90d
           trends: '0'
           units: unixtime
           preprocessing:
@@ -92,26 +104,44 @@ zabbix_export:
               parameters:
                 - 'return parseInt(Date.parse(value) / 1000)'
           master_item:
-            key: rpc-status
+            key: rpc_status
         - uuid: 1dbd1685d9254bf0b5f3c680a866db61
-          name: 'Minimal signed per window'
+          name: 'Minimum signed per window'
           type: DEPENDENT
           key: min_signed_per_window
           delay: '0'
           history: 1h
-          trends: '0'
           value_type: FLOAT
+          trends: '0'
+          units: '%'
+          preprocessing:
+            - type: JAVASCRIPT
+              parameters:
+                - |
+                  data = JSON.parse(value);
+                  return data.params.min_signed_per_window*100;
+          master_item:
+            key: slashing_params
+        - uuid: eaa3099e61d9424ca4e41430701d2faa
+          name: 'Node Pubkey'
+          type: DEPENDENT
+          key: node_pubkey
+          delay: '0'
+          history: 1h
+          value_type: TEXT
+          trends: '0'
           preprocessing:
             - type: JSONPATH
               parameters:
-                - $.params.min_signed_per_window
+                - $.result.validator_info.pub_key.value
           master_item:
-            key: slashing_params
+            key: rpc_status
         - uuid: fa120f4c33fb422e842688530ba7f674
           name: 'Number of Peers Inbound'
           type: DEPENDENT
-          key: number-of-peers-in
+          key: number_of_peers_in
           delay: '0'
+          history: 90d
           trends: '0'
           units: peers
           preprocessing:
@@ -119,12 +149,13 @@ zabbix_export:
               parameters:
                 - '$.result.peers[?(@.is_outbound == ''false'')].length()'
           master_item:
-            key: rpc-net-info
+            key: rpc_net_info
         - uuid: d65dedebb69c45459f46c564a3afeb45
           name: 'Number of Peers Outbound'
           type: DEPENDENT
-          key: number-of-peers-out
+          key: number_of_peers_out
           delay: '0'
+          history: 90d
           trends: '0'
           units: peers
           preprocessing:
@@ -132,32 +163,77 @@ zabbix_export:
               parameters:
                 - '$.result.peers[?(@.is_outbound == ''true'')].length()'
           master_item:
-            key: rpc-net-info
+            key: rpc_net_info
         - uuid: b5b57dd7832f4b5ba0efd1469708a676
           name: 'Net Info'
           type: HTTP_AGENT
-          key: rpc-net-info
+          key: rpc_net_info
           history: 1h
-          trends: '0'
           value_type: TEXT
+          trends: '0'
           timeout: 5s
           url: '{$NODE_RPC_ADDRESS}/net_info'
+          headers:
+            - name: Accept-Encoding
+              value: identity
+        - uuid: 836275cfe0fe4ba0b17b3eb66c94f326
+          name: 'RPC node Earliest Block Height'
+          type: DEPENDENT
+          key: rpc_node_earliest_block_height
+          delay: '0'
+          history: 90d
+          trends: '0'
+          preprocessing:
+            - type: JSONPATH
+              parameters:
+                - $.result.sync_info.earliest_block_height
+            - type: JAVASCRIPT
+              parameters:
+                - 'return parseInt(value)'
+          master_item:
+            key: rpc_status
+        - uuid: 7390b7a453384a6a9ee8a88de28a2376
+          name: 'RPC node Latest Block Height'
+          type: DEPENDENT
+          key: rpc_node_latest_block_height
+          delay: '0'
+          history: 90d
+          trends: '0'
+          preprocessing:
+            - type: JSONPATH
+              parameters:
+                - $.result.sync_info.latest_block_height
+            - type: JAVASCRIPT
+              parameters:
+                - 'return parseInt(value)'
+          master_item:
+            key: rpc_status
+          triggers:
+            - uuid: 8d79cf9f729f46c089e3884662c049f0
+              expression: 'rate(/Cosmos/rpc_node_latest_block_height,10m)=0'
+              name: 'No new blocks produced on RPC node'
+              opdata: 'RPC node Latest block height: {ITEM.LASTVALUE}'
+              priority: WARNING
         - uuid: 49ce87729c624aa7ba928f3d65f9b39e
           name: Status
           type: HTTP_AGENT
-          key: rpc-status
+          key: rpc_status
           history: 1h
-          trends: '0'
           value_type: TEXT
+          trends: '0'
+          timeout: 3s
           url: '{$NODE_RPC_ADDRESS}/status'
+          headers:
+            - name: Accept-Encoding
+              value: identity
           triggers:
             - uuid: f4deee7da2e64521a4fc7f25e1542557
-              expression: 'nodata(/Cosmos/rpc-status,600)=1'
-              name: 'Can`t get data from node RPC'
-              opdata: 'No data from node RPC in last 10min'
+              expression: 'nodata(/Cosmos/rpc_status,600)=1 and length({$NODE_RPC_ADDRESS})>0'
+              name: 'Failed to receive data from RPC node'
+              opdata: 'No data from RPC node in last 10min'
               priority: HIGH
         - uuid: 062ffe8e3d244bd5b4774df6b28dce29
-          name: 'Signed blocks window'
+          name: 'Signed Blocks Window'
           type: DEPENDENT
           key: signed_blocks_window
           delay: '0'
@@ -170,257 +246,778 @@ zabbix_export:
           master_item:
             key: slashing_params
         - uuid: 1ef590db7af5451192f4c461f5e947e8
-          name: 'Slashing params'
+          name: 'Slashing Params'
           type: HTTP_AGENT
           key: slashing_params
           history: 1h
-          trends: '0'
           value_type: TEXT
+          trends: '0'
           timeout: 5s
           url: '{$NODE_API_ADDRESS}/cosmos/slashing/v1beta1/params'
-        - uuid: e2740ed7f7844d47baefb3783d79c421
-          name: Uptime
-          type: CALCULATED
-          key: uptime
-          trends: '0'
-          value_type: FLOAT
-          units: '%'
-          params: '100-(last(//validator_missed)/last(//signed_blocks_window))*100'
-        - uuid: 97d1132dd0fb4da280bb9cacf33a40d0
-          name: 'Validator Bond Status'
-          type: DEPENDENT
-          key: validator_bond
-          delay: '0'
-          trends: '0'
-          value_type: TEXT
-          preprocessing:
-            - type: JSONPATH
-              parameters:
-                - $.validator.status
-          master_item:
-            key: validator_info
-          triggers:
-            - uuid: 6dc82985ff644fe790bd5437234489ba
-              expression: 'count(/Cosmos/validator_bond,#1,"ne","BOND_STATUS_BONDED")=1'
-              name: 'Validator status is not BONDED'
-              opdata: 'Current validator status: {ITEM.VALUE}'
-              priority: WARNING
-              manual_close: 'YES'
-        - uuid: f3f7719f9d0a44c9889087b4d3540536
-          name: 'Validator Commission'
-          type: HTTP_AGENT
-          key: validator_commission
-          trends: '0'
-          value_type: FLOAT
-          preprocessing:
-            - type: JSONPATH
-              parameters:
-                - '$.commission.commission[?(@.denom == "{$DENOM_TICKER}")].amount.first()'
-            - type: MULTIPLIER
-              parameters:
-                - '{$DENOM}'
-          timeout: 5s
-          url: '{$NODE_API_ADDRESS}/cosmos/distribution/v1beta1/validators/{$VALOPER}/commission'
-        - uuid: 612a02acb1c94cef8d92d88bb347a46d
-          name: 'Validator Info'
-          type: HTTP_AGENT
-          key: validator_info
-          history: 1h
-          trends: '0'
-          value_type: TEXT
-          timeout: 5s
-          url: '{$NODE_API_ADDRESS}/cosmos/staking/v1beta1/validators/{$VALOPER}'
-          triggers:
-            - uuid: 7bd196ed522341e799963373d557db03
-              expression: 'nodata(/Cosmos/validator_info,600)=1'
-              name: 'Can`t get data from node API'
-              opdata: 'No data from node API in last 10min'
-              priority: HIGH
-        - uuid: 40b957a0673a4c8d85437ba5850aac69
-          name: 'Validator Jail Status'
-          type: DEPENDENT
-          key: validator_jail
-          delay: '0'
-          trends: '0'
-          valuemap:
-            name: 'Boolean status'
-          preprocessing:
-            - type: JSONPATH
-              parameters:
-                - $.validator.jailed
-            - type: BOOL_TO_DECIMAL
-              parameters:
-                - ''
-          master_item:
-            key: validator_info
-          triggers:
-            - uuid: 594bf8517b32443bb9f30e2be714bd35
-              expression: 'count(/Cosmos/validator_jail,#1,"eq",1)=1'
-              name: 'Validator JAILED 🫣'
-              priority: DISASTER
-        - uuid: 39b317af58234f0fa49f2423e66387da
-          name: 'Validator Missed Blocks'
-          type: DEPENDENT
-          key: validator_missed
-          delay: '0'
-          trends: '0'
-          preprocessing:
-            - type: JSONPATH
-              parameters:
-                - $.val_signing_info.missed_blocks_counter
-          master_item:
-            key: validator_signing_infos
-          triggers:
-            - uuid: 5e3252a7122c486c8b11be1cf00125e8
-              expression: 'changecount(/Cosmos/validator_missed,5m)>10'
-              name: 'Missed >10 blocks in last 5min'
-              opdata: 'Current missed blocks count: {ITEM.VALUE}'
-              priority: WARNING
-              manual_close: 'YES'
+          headers:
+            - name: Accept-Encoding
+              value: identity
         - uuid: 5d8e040138e84654a36f00befb5cbefd
           name: 'Validator Position'
-          type: HTTP_AGENT
+          type: SCRIPT
           key: validator_position
+          delay: 5m
+          history: 90d
           trends: '0'
-          preprocessing:
-            - type: JAVASCRIPT
-              parameters:
-                - |
-                  var json = JSON.parse(value);
-                  json.validators.sort(function(a, b) {
-                      const aValue = a.tokens;
-                      const bValue = b.tokens;
-                      if (aValue.length !== bValue.length) {
-                          return bValue.length - aValue.length;
+          params: |
+            var apiAddress = '{$NODE_API_ADDRESS}'
+            request = new HttpRequest();
+            request.addHeader('Content-Type: application/json');
+            var validatorsPath = '{$VALIDATORS_API_PATH}'
+            if (!validatorsPath || validatorsPath == '{$VALIDATORS_'+'API_PATH}') {
+            response = request.get(apiAddress + '/cosmos/staking/v1beta1/validators?status=BOND_STATUS_BONDED&pagination.limit=500');
+            } else {
+            response = request.get(apiAddress + validatorsPath + '?status=BOND_STATUS_BONDED&pagination.limit=500');
+            }
+            if (request.getStatus() != 200) {
+                throw 'Response code for getValidatorInfo: ' + request.getStatus();
+            } else {
+            var json = JSON.parse(response);
+            }
+            json.validators.sort(function(a, b) {
+                const aValue = a.{$VOTING_POWER_PATH};
+                const bValue = b.{$VOTING_POWER_PATH};
+                if (aValue.length !== bValue.length) {
+                    return bValue.length - aValue.length;
+                }
+                // If lengths are the same, perform lexicographic (string) comparison
+                if (aValue > bValue) {
+                    return -1;  // a should come before b in the sorted order
+                } else if (aValue < bValue) {
+                    return 1;   // a should come after b in the sorted order
+                } else {
+                    return 0;   // a and b are equal, so their order doesn't matter
+                }
+            });
+            var position = -1; // Default value, assuming the address is not found
+            for (var i = 0; i < json.validators.length; i++) {
+                if (json.validators[i].operator_address === "{$VALOPER}") {
+                    position = i+1;
+                    break;
+                }
+            }
+            return position;
+          timeout: 5s
+      discovery_rules:
+        - uuid: 9504d03893cc4981ba25ee01704609b6
+          name: Validator
+          type: SCRIPT
+          key: validator
+          params: |
+            function findValueByKey(obj, key) {
+                if (typeof obj !== 'object' || obj === null) {
+                    return null;
+                }
+            
+                if (obj.hasOwnProperty(key)) {
+                    return obj[key];
+                }
+            
+                for (k in obj) {
+                    if (obj.hasOwnProperty(k)) {
+                        var result = findValueByKey(obj[k], key);
+                        if (result !== null) {
+                            return result;
+                        }
+                    }
+                }
+                return null;
+            }
+            
+            function base64ToBytes(base64String) {
+                var base64Chars = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/';
+                var base64Lookup = {};
+                for (var i = 0; i < base64Chars.length; i++) {
+                    base64Lookup[base64Chars[i]] = i;
+                }
+                
+                var bufferLength = base64String.length * 0.75;
+                var len = base64String.length;
+                var i, p = 0;
+                var encoded1, encoded2, encoded3, encoded4;
+            
+                if (base64String[base64String.length - 1] === '=') {
+                    bufferLength--;
+                    if (base64String[base64String.length - 2] === '=') {
+                        bufferLength--;
+                    }
+                }
+            
+                var bytes = new Uint8Array(bufferLength);
+            
+                for (i = 0; i < len; i += 4) {
+                    encoded1 = base64Lookup[base64String[i]];
+                    encoded2 = base64Lookup[base64String[i + 1]];
+                    encoded3 = base64Lookup[base64String[i + 2]];
+                    encoded4 = base64Lookup[base64String[i + 3]];
+            
+                    bytes[p++] = (encoded1 << 2) | (encoded2 >> 4);
+                    bytes[p++] = ((encoded2 & 15) << 4) | (encoded3 >> 2);
+                    bytes[p++] = ((encoded3 & 3) << 6) | encoded4;
+                }
+            
+                return bytes;
+            }
+            
+            function polymodStep(pre) {
+                var b = pre >> 25;
+                return (
+                    ((pre & 0x1FFFFFF) << 5) ^
+                    (-((b >> 0) & 1) & 0x3b6a57b2) ^
+                    (-((b >> 1) & 1) & 0x26508e6d) ^
+                    (-((b >> 2) & 1) & 0x1ea119fa) ^
+                    (-((b >> 3) & 1) & 0x3d4233dd) ^
+                    (-((b >> 4) & 1) & 0x2a1462b3)
+                );
+            }
+            
+            function prefixChk(prefix) {
+                var chk = 1;
+                for (var i = 0; i < prefix.length; ++i) {
+                    var c = prefix.charCodeAt(i);
+                    chk = polymodStep(chk) ^ (c >> 5);
+                }
+                chk = polymodStep(chk);
+            
+                for (i = 0; i < prefix.length; ++i) {
+                    var v = prefix.charCodeAt(i);
+                    chk = polymodStep(chk) ^ (v & 0x1f);
+                }
+                return chk;
+            }
+            
+            function encode(prefix, words) {
+                var ALPHABET = 'qpzry9x8gf2tvdw0s3jn54khce6mua7l';
+                prefix = prefix.toLowerCase();
+                var chk = prefixChk(prefix);
+            
+                var result = prefix + '1';
+                for (var i = 0; i < words.length; ++i) {
+                    var x = words[i];
+                    chk = polymodStep(chk) ^ x;
+                    result += ALPHABET.charAt(x);
+                }
+            
+                for (i = 0; i < 6; ++i) {
+                    chk = polymodStep(chk);
+                }
+                chk ^= 1;
+            
+                for (i = 0; i < 6; ++i) {
+                    var v = (chk >> ((5 - i) * 5)) & 0x1f;
+                    result += ALPHABET.charAt(v);
+                }
+            
+                return result;
+            }
+            
+            function convert(data, inBits, outBits, pad) {
+                var value = 0;
+                var bits = 0;
+                var maxV = (1 << outBits) - 1;
+            
+                var result = [];
+                for (var i = 0; i < data.length; ++i) {
+                    value = (value << inBits) | data[i];
+                    bits += inBits;
+            
+                    while (bits >= outBits) {
+                        bits -= outBits;
+                        result.push((value >> bits) & maxV);
+                    }
+                }
+            
+                if (pad && bits > 0) {
+                    result.push((value << (outBits - bits)) & maxV);
+                }
+            
+                return result;
+            }
+            
+            function toWords(bytes) {
+                return convert(bytes, 8, 5, true);
+            }
+            
+            function fromWords(words) {
+                return convert(words, 5, 8, false);
+            }
+            
+            function decodeUnsafe(str) {
+                var ALPHABET = 'qpzry9x8gf2tvdw0s3jn54khce6mua7l';
+                var ALPHABET_MAP = {};
+                for (var z = 0; z < ALPHABET.length; z++) {
+                    ALPHABET_MAP[ALPHABET.charAt(z)] = z;
+                }
+            
+                if (str.length < 8) return null;
+                if (str.length > 90) return null;
+            
+                var lowered = str.toLowerCase();
+                var uppered = str.toUpperCase();
+                if (str !== lowered && str !== uppered) return null;
+                str = lowered;
+            
+                var split = str.lastIndexOf('1');
+                if (split === -1) return null;
+                if (split === 0) return null;
+            
+                var prefix = str.slice(0, split);
+                var wordChars = str.slice(split + 1);
+                if (wordChars.length < 6) return null;
+            
+                var chk = prefixChk(prefix);
+                if (typeof chk === 'string') return null;
+            
+                var words = [];
+                for (var i = 0; i < wordChars.length; ++i) {
+                    var c = wordChars.charAt(i);
+                    var v = ALPHABET_MAP[c];
+                    if (v === undefined) return null;
+                    chk = polymodStep(chk) ^ v;
+            
+                    if (i + 6 >= wordChars.length) continue;
+                    words.push(v);
+                }
+            
+                if (chk !== 1) return null;
+                return { prefix: prefix, words: words };
+            }
+            
+            function decode(str) {
+                var result = decodeUnsafe(str);
+                if (result === null) throw new Error('Invalid bech32 string: ' + str);
+                return result;
+            }
+            
+            function sha256(ascii) {
+                function rightRotate(value, amount) {
+                    return (value >>> amount) | (value << (32 - amount));
+                }
+            
+                var mathPow = Math.pow;
+                var maxWord = mathPow(2, 32);
+                var lengthProperty = 'length';
+                var i, j;
+                var result = '';
+            
+                var words = [];
+                var asciiBitLength = ascii[lengthProperty] * 8;
+            
+                var hash = sha256.h = sha256.h || [];
+                var k = sha256.k = sha256.k || [];
+                var primeCounter = k[lengthProperty];
+            
+                var isComposite = {};
+                for (var candidate = 2; primeCounter < 64; candidate++) {
+                    if (!isComposite[candidate]) {
+                        for (i = 0; i < 313; i += candidate) {
+                            isComposite[i] = candidate;
+                        }
+                        hash[primeCounter] = (mathPow(candidate, .5) * maxWord) | 0;
+                        k[primeCounter++] = (mathPow(candidate, 1 / 3) * maxWord) | 0;
+                    }
+                }
+            
+                ascii += '\x80';
+                while (ascii[lengthProperty] % 64 - 56) ascii += '\x00';
+                for (i = 0; i < ascii[lengthProperty]; i++) {
+                    j = ascii.charCodeAt(i);
+                    if (j >> 8) return;
+                    words[i >> 2] |= j << ((3 - i) % 4) * 8;
+                }
+                words[words[lengthProperty]] = ((asciiBitLength / maxWord) | 0);
+                words[words[lengthProperty]] = (asciiBitLength);
+            
+                for (j = 0; j < words[lengthProperty];) {
+                    var w = words.slice(j, j += 16);
+                    var oldHash = hash;
+                    hash = hash.slice(0, 8);
+            
+                    for (i = 0; i < 64; i++) {
+                        var i2 = i + j;
+                        var w15 = w[i - 15], w2 = w[i - 2];
+                        var a = hash[0], e = hash[4];
+                        var temp1 = hash[7]
+                            + (rightRotate(e, 6) ^ rightRotate(e, 11) ^ rightRotate(e, 25))
+                            + ((e & hash[5]) ^ ((~e) & hash[6]))
+                            + k[i]
+                            + (w[i] = (i < 16) ? w[i] : (
+                                w[i - 16]
+                                + (rightRotate(w15, 7) ^ rightRotate(w15, 18) ^ (w15 >>> 3))
+                                + w[i - 7]
+                                + (rightRotate(w2, 17) ^ rightRotate(w2, 19) ^ (w2 >>> 10))
+                            ) | 0);
+                        var temp2 = (rightRotate(a, 2) ^ rightRotate(a, 13) ^ rightRotate(a, 22))
+                            + ((a & hash[1]) ^ (a & hash[2]) ^ (hash[1] & hash[2]));
+            
+                        hash = [(temp1 + temp2) | 0].concat(hash);
+                        hash[4] = (hash[4] + temp1) | 0;
+                    }
+            
+                    for (i = 0; i < 8; i++) {
+                        hash[i] = (hash[i] + oldHash[i]) | 0;
+                    }
+                }
+            
+                for (i = 0; i < 8; i++) {
+                    for (j = 3; j + 1; j--) {
+                        var b = (hash[i] >> (j * 8)) & 255;
+                        result += ((b < 16) ? 0 : '') + b.toString(16);
+                    }
+                }
+                return result;
+            }
+            
+            function getValidatorData(apiAddress, valoper) {
+                request = new HttpRequest();
+                request.addHeader('Content-Type: application/json');
+                var validatorsPath = '{$VALIDATORS_API_PATH}';
+                if (!validatorsPath || validatorsPath == '{$VALIDATORS_'+'API_PATH}') {
+                response = request.get(apiAddress + '/cosmos/staking/v1beta1/validators/' + valoper);
+                } else {
+                response = request.get(apiAddress + validatorsPath + '/' + valoper);
+                }
+                if (request.getStatus() != 200) {
+                    throw 'Response code for getValidatorInfo: ' + request.getStatus();
+                } else {
+                data = JSON.parse(response);
+                return data;
+                }
+            }
+            
+            function getBondDenom(apiAddress) {
+                request = new HttpRequest();
+                request.addHeader('Content-Type: application/json');
+                response = request.get(apiAddress + '/cosmos/staking/v1beta1/params');
+                if (request.getStatus() != 200) {
+                    return 'ERROR';
+                } else {
+                var denom = findValueByKey(JSON.parse(response), "bond_denom");
+                return denom;
+                }
+            }
+            
+            function getBondDenomExponent(apiAddress, bondDenom) {
+                request = new HttpRequest();
+                request.addHeader('Content-Type: application/json');
+                response = request.get(apiAddress + '/cosmos/bank/v1beta1/denoms_metadata/' + bondDenom);
+                var exponent;
+                if (request.getStatus() != 200) {
+                    return '1.0E-6';
+                } else {
+                var data = JSON.parse(response);
+                var display = data.metadata.display;
+                for (var i = 0; i < data.metadata.denom_units.length; i++) {
+                    if (data.metadata.denom_units[i].denom === display) {
+                        exponent = '1.0E-'+data.metadata.denom_units[i].exponent;
+                    } else { exponent = '1.0E-6'; }
+                }
+                return exponent;
+                }
+            }
+            
+            function getBondDenomDisplay(apiAddress, bondDenom) {
+                request = new HttpRequest();
+                request.addHeader('Content-Type: application/json');
+                response = request.get(apiAddress + '/cosmos/bank/v1beta1/denoms_metadata/' + bondDenom);
+                if (request.getStatus() != 200) {
+                    return '';
+                } else {
+                var data = JSON.parse(response);
+                return data.metadata.display;
+                }
+            }
+            
+            // Основная функция для получения всех данных
+            function getValidatorInfo() {
+                // Get macros values
+                var apiAddr = '{$NODE_API_ADDRESS}'
+                var valoper = '{$VALOPER}'
+                var bondDenom = '{$BOND_DENOM}'
+                var denomExponent = '{$DENOM_EXPONENT}'
+                var input = getValidatorData(apiAddr, valoper);
+            
+                // Получение valcons адреса
+                var pubKeyBase64 = input.validator.consensus_pubkey.key;
+                var operatorAddress = input.validator.operator_address;
+                var prefix = operatorAddress.split('valoper')[0] + 'valcons';
+                var pubKeyBytes = base64ToBytes(pubKeyBase64);
+                var sha256Bytes = sha256(String.fromCharCode.apply(null, pubKeyBytes));
+                var hashedPubKey = [];
+                for (var i = 0; i < 40; i += 2) {
+                    hashedPubKey.push(parseInt(sha256Bytes.substr(i, 2), 16));
+                }
+                hashedPubKey = hashedPubKey.slice(0, 20);
+                var words = toWords(hashedPubKey);
+                var valconsAddress = encode(prefix, words);
+            
+                // Получение адреса кошелька
+                var decoded = decode(operatorAddress);
+                var decodedBytes = fromWords(decoded.words);
+                var walletPrefix = decoded.prefix.split('valoper')[0];
+                var walletAddress = encode(walletPrefix, toWords(decodedBytes));
+            
+                // Получение bond denom
+                if (!bondDenom || bondDenom == '{$BOND_'+'DENOM}') {
+                bondDenom = getBondDenom(apiAddr);
+                }
+            
+                //Получение denom exponent
+                if (!denomExponent || denomExponent == '{$DENOM_'+'EXPONENT}') {
+                denomExponent = getBondDenomExponent(apiAddr, bondDenom);
+                }
+            
+                //Получение denom display
+                denomDisplay = getBondDenomDisplay(apiAddr, bondDenom);
+            
+                var validatorsPath = '{$VALIDATORS_API_PATH}'
+                if (!validatorsPath || validatorsPath == '{$VALIDATORS_'+'API_PATH}') {
+                var validatorUrl = apiAddr + '/cosmos/staking/v1beta1/validators/' + valoper;
+                } else {
+                var validatorUrl = apiAddr + validatorsPath + '/' + valoper;
+                }
+            
+                return {
+                    "{#VALCONS}": valconsAddress,
+                    "{#SELF_BOND_WALLET}": walletAddress,
+                    "{#BOND_DENOM}": bondDenom,
+                    "{#DENOM_DISPLAY}": denomDisplay,
+                    "{#DENOM_EXPONENT}": denomExponent,
+                    "{#VALIDATOR_URL}": validatorUrl,
+                    "{#KEY}": "key" 
+                };
+            }
+            
+            var validatorInfo = getValidatorInfo();
+            var result = {
+                "data": [validatorInfo]
+            };
+            return JSON.stringify(result);
+          lifetime_type: DELETE_IMMEDIATELY
+          lifetime: '0'
+          item_prototypes:
+            - uuid: 01c4a6ce2b0c49dfbd8cb983489535b7
+              name: 'Validator Bond Status'
+              type: DEPENDENT
+              key: 'validator_bond[{#KEY}]'
+              delay: '0'
+              history: 90d
+              trends: '0'
+              valuemap:
+                name: 'Bond status'
+              preprocessing:
+                - type: JAVASCRIPT
+                  parameters:
+                    - |
+                      var data = JSON.parse(value);
+                      var bondStatusNameToValue = {
+                          "BOND_STATUS_UNBONDED": 0,
+                          "BOND_STATUS_BONDED": 1,
+                          "BOND_STATUS_UNBONDING": 2,
+                          "BOND_STATUS_UNSPECIFIED": 3
+                      };
+                      
+                      return bondStatusNameToValue[data.validator.status];
+              master_item:
+                key: 'validator_data[{#KEY}]'
+              trigger_prototypes:
+                - uuid: 280f7b4274864d368091f27875abec72
+                  expression: 'last(/Cosmos/validator_bond[{#KEY}])<>1'
+                  name: 'Validator status is not BONDED'
+                  opdata: 'Current validator status: {ITEM.LASTVALUE}'
+                  priority: WARNING
+                  manual_close: 'YES'
+                  dependencies:
+                    - name: 'Validator JAILED 🫣'
+                      expression: 'count(/Cosmos/validator_jail[{#KEY}],#1,"eq",1)=1'
+                    - name: 'Validator TOMBSTONED ⚰️'
+                      expression: 'count(/Cosmos/validator_tombstoned[{#KEY}],#1,"eq",1)=1'
+            - uuid: ee877b172e784d51a803f85e71faa24f
+              name: 'Validator Commission'
+              type: HTTP_AGENT
+              key: 'validator_commission[{#KEY}]'
+              history: 90d
+              value_type: FLOAT
+              trends: '0'
+              preprocessing:
+                - type: JAVASCRIPT
+                  parameters:
+                    - |
+                      data = JSON.parse(value);
+                      for (var i = 0; i < data.commission.commission.length; i++) {
+                      if (data.commission.commission[i].denom === '{#BOND_DENOM}') {
+                          var amount = data.commission.commission[i].amount*'{#DENOM_EXPONENT}';
+                          return amount.toFixed(2);
+                          }
                       }
-                      // If lengths are the same, perform lexicographic (string) comparison
-                      if (aValue > bValue) {
-                          return -1;  // a should come before b in the sorted order
-                      } else if (aValue < bValue) {
-                          return 1;   // a should come after b in the sorted order
-                      } else {
-                          return 0;   // a and b are equal, so their order doesn't matter
+                          return null;
                       }
-                  });
-                  var position = -1; // Default value, assuming the address is not found
-                  for (var i = 0; i < json.validators.length; i++) {
-                      if (json.validators[i].operator_address === "{$VALOPER}") {
-                          position = i+1;
-                          break;
+              url: '{$NODE_API_ADDRESS}/cosmos/distribution/v1beta1/validators/{$VALOPER}/commission'
+              headers:
+                - name: Accept-Encoding
+                  value: identity
+            - uuid: 709bfa9ea4bf4fba9b64e42697d3f21a
+              name: 'Validator Data'
+              type: HTTP_AGENT
+              key: 'validator_data[{#KEY}]'
+              history: 1h
+              value_type: TEXT
+              trends: '0'
+              url: '{#VALIDATOR_URL}'
+              headers:
+                - name: Accept-Encoding
+                  value: identity
+            - uuid: 530ec8677803454da78671443a88a17f
+              name: 'Validator Jail Status'
+              type: DEPENDENT
+              key: 'validator_jail[{#KEY}]'
+              delay: '0'
+              history: 90d
+              trends: '0'
+              valuemap:
+                name: 'Boolean status'
+              preprocessing:
+                - type: JSONPATH
+                  parameters:
+                    - $.validator.jailed
+                - type: BOOL_TO_DECIMAL
+                  parameters:
+                    - ''
+              master_item:
+                key: 'validator_data[{#KEY}]'
+              trigger_prototypes:
+                - uuid: cada1472685d49fb968dd6141523a11c
+                  expression: 'count(/Cosmos/validator_jail[{#KEY}],#1,"eq",1)=1'
+                  name: 'Validator JAILED 🫣'
+                  priority: DISASTER
+            - uuid: 6d981121d8014355b30739235ccf3a0e
+              name: 'Validator Missed Blocks'
+              type: DEPENDENT
+              key: 'validator_missed[{#KEY}]'
+              delay: '0'
+              history: 90d
+              trends: '0'
+              preprocessing:
+                - type: JSONPATH
+                  parameters:
+                    - $.val_signing_info.missed_blocks_counter
+              master_item:
+                key: 'validator_signing_infos[{#KEY}]'
+            - uuid: 025b62d9094c4854bf76a3807eafc308
+              name: 'Validator Pubkey'
+              type: DEPENDENT
+              key: 'validator_pubkey[{#KEY}]'
+              delay: '0'
+              history: 1h
+              value_type: TEXT
+              trends: '0'
+              preprocessing:
+                - type: JSONPATH
+                  parameters:
+                    - $.validator.consensus_pubkey.key
+              master_item:
+                key: 'validator_data[{#KEY}]'
+            - uuid: 9d8b73b958514546947dc1dffa1b8bb0
+              name: 'Validator Rewards'
+              type: HTTP_AGENT
+              key: 'validator_rewards[{#KEY}]'
+              history: 90d
+              value_type: FLOAT
+              trends: '0'
+              preprocessing:
+                - type: JAVASCRIPT
+                  parameters:
+                    - |
+                      data = JSON.parse(value);
+                      for (var i = 0; i < data.total.length; i++) {
+                      if (data.total[i].denom === '{#BOND_DENOM}') {
+                          var amount = data.total[i].amount*'{#DENOM_EXPONENT}';
+                          return amount.toFixed(2);
+                          }
                       }
-                  }
-                  return position;
-          timeout: 5s
-          url: '{$NODE_API_ADDRESS}/cosmos/staking/v1beta1/validators?status=BOND_STATUS_BONDED&pagination.limit=200'
-        - uuid: f718b922b0d14b8393c4c83b53c22991
-          name: 'Validator Rewards'
-          type: HTTP_AGENT
-          key: validator_rewards
-          trends: '0'
-          value_type: FLOAT
-          preprocessing:
-            - type: JSONPATH
-              parameters:
-                - '$.total[?(@.denom == "{$DENOM_TICKER}")].amount.first()'
-            - type: MULTIPLIER
-              parameters:
-                - '{$DENOM}'
-          timeout: 5s
-          url: '{$NODE_API_ADDRESS}/cosmos/distribution/v1beta1/delegators/{$SELF_BOND_WALLET}/rewards'
-        - uuid: 5d00483a4b8d4893856a039d7edcab9c
-          name: 'Validator Signing Infos'
-          type: HTTP_AGENT
-          key: validator_signing_infos
-          history: 1h
-          trends: '0'
-          value_type: TEXT
-          timeout: 5s
-          url: '{$NODE_API_ADDRESS}/cosmos/slashing/v1beta1/signing_infos/{$VALCONS}'
-        - uuid: d5028dca1b6c4f709426a2d556284614
-          name: 'Validator Tombstone Status'
-          type: DEPENDENT
-          key: validator_tombstoned
-          delay: '0'
-          trends: '0'
-          valuemap:
-            name: 'Boolean status'
-          preprocessing:
-            - type: JSONPATH
-              parameters:
-                - $.val_signing_info.tombstoned
-            - type: BOOL_TO_DECIMAL
-              parameters:
-                - ''
-          master_item:
-            key: validator_signing_infos
-          triggers:
-            - uuid: 42f3561826674454b8cc2a763643fac6
-              expression: 'count(/Cosmos/validator_tombstoned,#1,"eq",1)=1'
-              name: 'Validator TOMBSTONED ⚰️'
-              priority: DISASTER
-        - uuid: 286b748ef15a453e95c16448b504187a
-          name: 'Validator wallet balance'
-          type: HTTP_AGENT
-          key: validator_wallet_balance
-          trends: '0'
-          value_type: FLOAT
-          preprocessing:
-            - type: JSONPATH
-              parameters:
-                - '$.balances[?(@.denom == "{$DENOM_TICKER}")].amount.first()'
-            - type: MULTIPLIER
-              parameters:
-                - '{$DENOM}'
-          timeout: 5s
-          url: '{$NODE_API_ADDRESS}/cosmos/bank/v1beta1/balances/{$SELF_BOND_WALLET}'
-          triggers:
-            - uuid: d935f8902f1a4de3aa6503c371bdb882
-              expression: change(/Cosmos/validator_wallet_balance)>10
-              name: 'Wallet balance INCREASED 💸'
-              opdata: 'Current balance: {ITEM.VALUE}'
-              priority: INFO
+                          return null;
+                      }
+              url: '{$NODE_API_ADDRESS}/cosmos/distribution/v1beta1/delegators/{#SELF_BOND_WALLET}/rewards'
+              headers:
+                - name: Accept-Encoding
+                  value: identity
+            - uuid: 004fe4b478d84fcf8467f0ddca7b87cc
+              name: 'Validator Signing Infos'
+              type: HTTP_AGENT
+              key: 'validator_signing_infos[{#KEY}]'
+              history: 1h
+              value_type: TEXT
+              trends: '0'
+              url: '{$NODE_API_ADDRESS}/cosmos/slashing/v1beta1/signing_infos/{#VALCONS}'
+              headers:
+                - name: Accept-Encoding
+                  value: identity
+            - uuid: 45a12248281741afa9d459dbf0bc3971
+              name: 'Validator Tombstone Status'
+              type: DEPENDENT
+              key: 'validator_tombstoned[{#KEY}]'
+              delay: '0'
+              history: 90d
+              trends: '0'
+              valuemap:
+                name: 'Boolean status'
+              preprocessing:
+                - type: JSONPATH
+                  parameters:
+                    - $.val_signing_info.tombstoned
+                - type: BOOL_TO_DECIMAL
+                  parameters:
+                    - ''
+              master_item:
+                key: 'validator_signing_infos[{#KEY}]'
+              trigger_prototypes:
+                - uuid: 6562d6298bd342df85ceaa07521b1045
+                  expression: 'count(/Cosmos/validator_tombstoned[{#KEY}],#1,"eq",1)=1'
+                  name: 'Validator TOMBSTONED ⚰️'
+                  priority: DISASTER
+            - uuid: d30241d5a6094fdf9b81191f43b0464b
+              name: 'Validator Uptime'
+              type: CALCULATED
+              key: 'validator_uptime[{#KEY}]'
+              history: 90d
+              value_type: FLOAT
+              trends: '0'
+              units: '%'
+              params: '100-(last(//validator_missed[{#KEY}])/last(//signed_blocks_window))*100'
+            - uuid: 36b5591766f545af89305e8615099fc6
+              name: 'Validator Voting Power'
+              type: DEPENDENT
+              key: 'validator_voting_power[{#KEY}]'
+              delay: '0'
+              history: 90d
+              value_type: FLOAT
+              trends: '0'
+              preprocessing:
+                - type: JAVASCRIPT
+                  parameters:
+                    - |
+                      data = JSON.parse(value);
+                      var amount = data.validator.{$VOTING_POWER_PATH}*'{#DENOM_EXPONENT}';
+                      return amount.toFixed(2);
+              master_item:
+                key: 'validator_data[{#KEY}]'
+              trigger_prototypes:
+                - uuid: b7b380f4badc437eab3410e148e9d133
+                  expression: 'change(/Cosmos/validator_voting_power[{#KEY}])<-{$DELEGATION_DELTA}'
+                  name: 'Voting power DECREASED 📉'
+                  event_name: 'Voting power DECREASED by {{?change(//validator_voting_power[{#KEY}])}.fmtnum(2)} {#DENOM_DISPLAY} 📉'
+                  opdata: 'Current voting power: {ITEM.LASTVALUE} {#DENOM_DISPLAY}'
+                  priority: INFO
+                  manual_close: 'YES'
+                - uuid: 27832f028aab49a190bd98fd4362ebe6
+                  expression: 'change(/Cosmos/validator_voting_power[{#KEY}])>{$DELEGATION_DELTA}'
+                  name: 'Voting power INCREASED 📈'
+                  event_name: 'Voting power INCREASED by {{?change(//validator_voting_power[{#KEY}])}.fmtnum(2)} {#DENOM_DISPLAY} 📈'
+                  opdata: 'Current voting power: {ITEM.LASTVALUE} {#DENOM_DISPLAY}'
+                  priority: INFO
+                  manual_close: 'YES'
+            - uuid: eef82657ca8e48a4a0aa2aa98f5d8322
+              name: 'Validator Wallet Balance'
+              type: HTTP_AGENT
+              key: 'validator_wallet_balance[{#KEY}]'
+              history: 90d
+              value_type: FLOAT
+              trends: '0'
+              preprocessing:
+                - type: JAVASCRIPT
+                  parameters:
+                    - |
+                      data = JSON.parse(value);
+                      for (var i = 0; i < data.balances.length; i++) {
+                      if (data.balances[i].denom === '{#BOND_DENOM}') {
+                          var amount = data.balances[i].amount*'{#DENOM_EXPONENT}';
+                          return amount.toFixed(2);
+                          }
+                      }
+                          return null;
+                      }
+              url: '{$NODE_API_ADDRESS}/cosmos/bank/v1beta1/balances/{#SELF_BOND_WALLET}'
+              headers:
+                - name: Accept-Encoding
+                  value: identity
+              trigger_prototypes:
+                - uuid: 50e9033a793d45c98712a1bfa5eab5bb
+                  expression: 'change(/Cosmos/validator_wallet_balance[{#KEY}])>{$BALANCE_DELTA}'
+                  name: 'Wallet balance INCREASED 💸'
+                  event_name: 'Wallet balance INCREASED by {{?change(//validator_wallet_balance[{#KEY}])}.fmtnum(2)} {#DENOM_DISPLAY} 💸'
+                  opdata: 'Current balance: {ITEM.LASTVALUE} {#DENOM_DISPLAY}'
+                  priority: INFO
+                  manual_close: 'YES'
+          trigger_prototypes:
+            - uuid: bd9b987906e34b2a9bafff372951a38d
+              expression: 'last(/Cosmos/validator_uptime[{#KEY}])<100-(100-last(/Cosmos/min_signed_per_window))*0.2'
+              name: 'Validator missing blocks 0.2'
+              event_name: 'Validator missed {?last(//validator_missed[key])} blocks, uptime below {?100-(100-last(//min_signed_per_window))*0.2}%'
+              opdata: 'JAIL if uptime drop to {ITEM.LASTVALUE2}'
+              priority: WARNING
               manual_close: 'YES'
-        - uuid: 7ed322179e2b448c970f4e5f621a275a
-          name: 'Voting Power'
-          type: DEPENDENT
-          key: voting_power
-          delay: '0'
-          trends: '0'
-          preprocessing:
-            - type: JSONPATH
-              parameters:
-                - $.result.validator_info.voting_power
-          master_item:
-            key: rpc-status
-          triggers:
-            - uuid: 1956c379fbcc429d9183788c60617812
-              expression: change(/Cosmos/voting_power)<-10
-              name: 'Voting power DECREASED 📉'
-              opdata: 'Current voting power: {ITEM.VALUE}'
-              priority: INFO
-              type: MULTIPLE
-            - uuid: cc18f768ef4d4a1080e15af47bda839a
-              expression: change(/Cosmos/voting_power)>10
-              name: 'Voting power INCREASED 📈'
-              opdata: 'Current voting power: {ITEM.VALUE}'
-              priority: INFO
+              dependencies:
+                - name: 'Validator JAILED 🫣'
+                  expression: 'count(/Cosmos/validator_jail[{#KEY}],#1,"eq",1)=1'
+                - name: 'Validator missing blocks 0.5'
+                  expression: 'last(/Cosmos/validator_uptime[{#KEY}])<100-(100-last(/Cosmos/min_signed_per_window))*0.5'
+                - name: 'Validator missing blocks 0.8'
+                  expression: 'last(/Cosmos/validator_uptime[{#KEY}])<100-(100-last(/Cosmos/min_signed_per_window))*0.8'
+                - name: 'Validator TOMBSTONED ⚰️'
+                  expression: 'count(/Cosmos/validator_tombstoned[{#KEY}],#1,"eq",1)=1'
+            - uuid: 94c9e66e2caf4779a85469e5603c3269
+              expression: 'last(/Cosmos/validator_uptime[{#KEY}])<100-(100-last(/Cosmos/min_signed_per_window))*0.5'
+              name: 'Validator missing blocks 0.5'
+              event_name: 'Validator missed {?last(//validator_missed[key])} blocks, uptime below {?100-(100-last(//min_signed_per_window))*0.5}%'
+              opdata: 'JAIL if uptime drop to {ITEM.LASTVALUE2}'
+              priority: WARNING
               manual_close: 'YES'
+              dependencies:
+                - name: 'Validator JAILED 🫣'
+                  expression: 'count(/Cosmos/validator_jail[{#KEY}],#1,"eq",1)=1'
+                - name: 'Validator missing blocks 0.8'
+                  expression: 'last(/Cosmos/validator_uptime[{#KEY}])<100-(100-last(/Cosmos/min_signed_per_window))*0.8'
+                - name: 'Validator TOMBSTONED ⚰️'
+                  expression: 'count(/Cosmos/validator_tombstoned[{#KEY}],#1,"eq",1)=1'
+            - uuid: fa63feea7b94424988bbf74ca3f6a445
+              expression: 'last(/Cosmos/validator_uptime[{#KEY}])<100-(100-last(/Cosmos/min_signed_per_window))*0.8'
+              name: 'Validator missing blocks 0.8'
+              event_name: 'Validator missed {?last(//validator_missed[key])} blocks, uptime below {?100-(100-last(//min_signed_per_window))*0.8}%'
+              opdata: 'JAIL if uptime drop to {ITEM.LASTVALUE2}'
+              priority: WARNING
+              manual_close: 'YES'
+              dependencies:
+                - name: 'Validator JAILED 🫣'
+                  expression: 'count(/Cosmos/validator_jail[{#KEY}],#1,"eq",1)=1'
+                - name: 'Validator TOMBSTONED ⚰️'
+                  expression: 'count(/Cosmos/validator_tombstoned[{#KEY}],#1,"eq",1)=1'
       macros:
-        - macro: '{$DENOM}'
-          value: '1.0E-6'
-          description: 'Denom multiplier, example: 0.000001'
-        - macro: '{$DENOM_TICKER}'
-          description: 'Denom ticker, example: ATOM'
+        - macro: '{$BALANCE_DELTA}'
+          value: '1'
+          description: 'Min wallet balance change to send notification'
+        - macro: '{$BOND_DENOM}'
+          description: 'Base network bond denom, example: uatom'
+        - macro: '{$DELEGATION_DELTA}'
+          value: '100'
+          description: 'Min delegation change to send notification'
+        - macro: '{$DENOM_EXPONENT}'
+          description: 'Denom exponent multiplier, example: 1.0E-6'
         - macro: '{$NODE_API_ADDRESS}'
           description: 'Node API address (ip:port or https link) example: http://1.2.3.4:1317'
         - macro: '{$NODE_RPC_ADDRESS}'
           description: 'Node RPC address (ip:port or https link) example: http://1.2.3.4:26657'
-        - macro: '{$SELF_BOND_WALLET}'
-          description: 'Self bond wallet address'
-        - macro: '{$VALCONS}'
-          description: 'Validator consensus address'
+        - macro: '{$VALIDATORS_API_PATH}'
+          description: 'Custom validators api path, for non-standart cosmos networks'
         - macro: '{$VALOPER}'
           description: 'Validator operator address'
+        - macro: '{$VOTING_POWER_PATH}'
+          value: tokens
+          description: 'Custom .tokens api path, for non-standart cosmos networks'
       dashboards:
         - uuid: c62a374657624da485135f71bed2e9d1
           name: 'Cosmos Node'
@@ -429,12 +1026,9 @@ zabbix_export:
             - name: Status
               widgets:
                 - type: item
-                  width: '24'
+                  width: '72'
                   hide_header: 'YES'
                   fields:
-                    - type: INTEGER
-                      name: adv_conf
-                      value: '1'
                     - type: STRING
                       name: description
                       value: |
@@ -450,19 +1044,16 @@ zabbix_export:
                       name: itemid
                       value:
                         host: Cosmos
-                        key: rpc-status
+                        key: rpc_status
                     - type: INTEGER
                       name: show
                       value: '1'
                 - type: item
                   'y': '2'
-                  width: '5'
+                  width: '15'
                   height: '3'
                   hide_header: 'YES'
                   fields:
-                    - type: INTEGER
-                      name: adv_conf
-                      value: '1'
                     - type: INTEGER
                       name: decimal_places
                       value: '0'
@@ -470,7 +1061,7 @@ zabbix_export:
                       name: itemid
                       value:
                         host: Cosmos
-                        key: latest-block-height
+                        key: rpc_node_latest_block_height
                     - type: INTEGER
                       name: show
                       value: '1'
@@ -488,13 +1079,10 @@ zabbix_export:
                       value: '0'
                 - type: item
                   'y': '5'
-                  width: '5'
+                  width: '15'
                   height: '3'
                   hide_header: 'YES'
                   fields:
-                    - type: INTEGER
-                      name: adv_conf
-                      value: '1'
                     - type: INTEGER
                       name: decimal_places
                       value: '0'
@@ -505,31 +1093,28 @@ zabbix_export:
                       name: show
                       value: '2'
                     - type: STRING
-                      name: thresholds.color.0
+                      name: thresholds.0.color
                       value: 388E3C
                     - type: STRING
-                      name: thresholds.color.1
-                      value: FB8C00
-                    - type: STRING
-                      name: thresholds.color.2
-                      value: D32F2F
-                    - type: STRING
-                      name: thresholds.threshold.0
+                      name: thresholds.0.threshold
                       value: '0'
                     - type: STRING
-                      name: thresholds.threshold.1
+                      name: thresholds.1.color
+                      value: FB8C00
+                    - type: STRING
+                      name: thresholds.1.threshold
                       value: '8'
                     - type: STRING
-                      name: thresholds.threshold.2
+                      name: thresholds.2.color
+                      value: D32F2F
+                    - type: STRING
+                      name: thresholds.2.threshold
                       value: '10'
                 - type: item
                   'y': '8'
-                  width: '24'
+                  width: '72'
                   hide_header: 'YES'
                   fields:
-                    - type: INTEGER
-                      name: adv_conf
-                      value: '1'
                     - type: STRING
                       name: description
                       value: |
@@ -545,30 +1130,22 @@ zabbix_export:
                       name: itemid
                       value:
                         host: Cosmos
-                        key: rpc-status
+                        key: rpc_status
                     - type: INTEGER
                       name: show
                       value: '1'
                 - type: item
                   'y': '10'
-                  width: '5'
+                  width: '15'
                   height: '3'
                   hide_header: 'YES'
                   fields:
-                    - type: INTEGER
-                      name: adv_conf
-                      value: '1'
                     - type: INTEGER
                       name: decimal_places
                       value: '0'
                     - type: INTEGER
                       name: decimal_size
                       value: '15'
-                    - type: ITEM
-                      name: itemid
-                      value:
-                        host: Cosmos
-                        key: validator_bond
                     - type: INTEGER
                       name: show
                       value: '1'
@@ -586,21 +1163,13 @@ zabbix_export:
                       value: '15'
                 - type: item
                   'y': '13'
-                  width: '5'
+                  width: '15'
                   height: '3'
                   hide_header: 'YES'
                   fields:
                     - type: INTEGER
-                      name: adv_conf
-                      value: '1'
-                    - type: INTEGER
                       name: decimal_places
                       value: '0'
-                    - type: ITEM
-                      name: itemid
-                      value:
-                        host: Cosmos
-                        key: validator_missed
                     - type: INTEGER
                       name: show
                       value: '1'
@@ -608,28 +1177,28 @@ zabbix_export:
                       name: show
                       value: '2'
                     - type: STRING
-                      name: thresholds.color.0
+                      name: thresholds.0.color
                       value: 388E3C
                     - type: STRING
-                      name: thresholds.color.1
-                      value: FDD835
-                    - type: STRING
-                      name: thresholds.color.2
-                      value: F57C00
-                    - type: STRING
-                      name: thresholds.color.3
-                      value: FF0000
-                    - type: STRING
-                      name: thresholds.threshold.0
+                      name: thresholds.0.threshold
                       value: '0'
                     - type: STRING
-                      name: thresholds.threshold.1
+                      name: thresholds.1.color
+                      value: FDD835
+                    - type: STRING
+                      name: thresholds.1.threshold
                       value: '10'
                     - type: STRING
-                      name: thresholds.threshold.2
+                      name: thresholds.2.color
+                      value: F57C00
+                    - type: STRING
+                      name: thresholds.2.threshold
                       value: '30'
                     - type: STRING
-                      name: thresholds.threshold.3
+                      name: thresholds.3.color
+                      value: FF0000
+                    - type: STRING
+                      name: thresholds.3.threshold
                       value: '50'
                     - type: INTEGER
                       name: units_bold
@@ -638,15 +1207,12 @@ zabbix_export:
                       name: units_show
                       value: '0'
                 - type: item
-                  x: '5'
+                  x: '15'
                   'y': '2'
-                  width: '5'
+                  width: '15'
                   height: '3'
                   hide_header: 'YES'
                   fields:
-                    - type: INTEGER
-                      name: adv_conf
-                      value: '1'
                     - type: INTEGER
                       name: decimal_places
                       value: '0'
@@ -654,7 +1220,7 @@ zabbix_export:
                       name: itemid
                       value:
                         host: Cosmos
-                        key: catching-up
+                        key: catching_up
                     - type: INTEGER
                       name: show
                       value: '1'
@@ -668,15 +1234,12 @@ zabbix_export:
                       name: units_show
                       value: '0'
                 - type: item
-                  x: '5'
+                  x: '15'
                   'y': '5'
-                  width: '5'
+                  width: '15'
                   height: '3'
                   hide_header: 'YES'
                   fields:
-                    - type: INTEGER
-                      name: adv_conf
-                      value: '1'
                     - type: INTEGER
                       name: decimal_places
                       value: '0'
@@ -684,137 +1247,85 @@ zabbix_export:
                       name: itemid
                       value:
                         host: Cosmos
-                        key: number-of-peers-in
+                        key: number_of_peers_in
                     - type: INTEGER
                       name: show
                       value: '1'
                     - type: INTEGER
                       name: show
                       value: '2'
-                - type: item
-                  x: '5'
-                  'y': '10'
-                  width: '5'
-                  height: '3'
-                  hide_header: 'YES'
-                  fields:
-                    - type: INTEGER
-                      name: adv_conf
-                      value: '1'
-                    - type: INTEGER
-                      name: decimal_places
-                      value: '0'
-                    - type: ITEM
-                      name: itemid
-                      value:
-                        host: Cosmos
-                        key: voting_power
-                    - type: INTEGER
-                      name: show
-                      value: '1'
-                    - type: INTEGER
-                      name: show
-                      value: '2'
-                    - type: STRING
-                      name: units
-                      value: '!NLS'
-                    - type: INTEGER
-                      name: units_size
-                      value: '20'
-                - type: item
-                  x: '10'
-                  'y': '2'
-                  width: '5'
-                  height: '3'
-                  hide_header: 'YES'
-                  fields:
-                    - type: INTEGER
-                      name: adv_conf
-                      value: '1'
-                    - type: INTEGER
-                      name: decimal_places
-                      value: '0'
-                    - type: INTEGER
-                      name: show
-                      value: '1'
-                    - type: INTEGER
-                      name: show
-                      value: '2'
-                    - type: INTEGER
-                      name: units_bold
-                      value: '0'
-                    - type: INTEGER
-                      name: units_show
-                      value: '0'
-                - type: item
-                  x: '10'
-                  'y': '5'
-                  width: '5'
-                  height: '3'
-                  hide_header: 'YES'
-                  fields:
-                    - type: INTEGER
-                      name: adv_conf
-                      value: '1'
-                    - type: INTEGER
-                      name: decimal_places
-                      value: '0'
-                    - type: ITEM
-                      name: itemid
-                      value:
-                        host: Cosmos
-                        key: number-of-peers-out
-                    - type: INTEGER
-                      name: show
-                      value: '1'
-                    - type: INTEGER
-                      name: show
-                      value: '2'
-                - type: item
-                  x: '10'
-                  'y': '10'
-                  width: '5'
-                  height: '3'
-                  hide_header: 'YES'
-                  fields:
-                    - type: INTEGER
-                      name: adv_conf
-                      value: '1'
-                    - type: ITEM
-                      name: itemid
-                      value:
-                        host: Cosmos
-                        key: validator_commission
-                    - type: INTEGER
-                      name: show
-                      value: '1'
-                    - type: INTEGER
-                      name: show
-                      value: '2'
-                    - type: STRING
-                      name: units
-                      value: '!NLS'
-                    - type: INTEGER
-                      name: units_bold
-                      value: '0'
-                    - type: INTEGER
-                      name: units_size
-                      value: '20'
                 - type: item
                   x: '15'
                   'y': '10'
-                  width: '5'
+                  width: '15'
                   height: '3'
                   hide_header: 'YES'
                   fields:
                     - type: INTEGER
-                      name: adv_conf
+                      name: decimal_places
+                      value: '0'
+                    - type: INTEGER
+                      name: show
                       value: '1'
+                    - type: INTEGER
+                      name: show
+                      value: '2'
+                    - type: STRING
+                      name: units
+                      value: '!NLS'
+                    - type: INTEGER
+                      name: units_size
+                      value: '20'
+                - type: item
+                  x: '30'
+                  'y': '2'
+                  width: '15'
+                  height: '3'
+                  hide_header: 'YES'
+                  fields:
+                    - type: INTEGER
+                      name: decimal_places
+                      value: '0'
+                    - type: INTEGER
+                      name: show
+                      value: '1'
+                    - type: INTEGER
+                      name: show
+                      value: '2'
+                    - type: INTEGER
+                      name: units_bold
+                      value: '0'
+                    - type: INTEGER
+                      name: units_show
+                      value: '0'
+                - type: item
+                  x: '30'
+                  'y': '5'
+                  width: '15'
+                  height: '3'
+                  hide_header: 'YES'
+                  fields:
+                    - type: INTEGER
+                      name: decimal_places
+                      value: '0'
                     - type: ITEM
                       name: itemid
                       value:
                         host: Cosmos
-                        key: validator_wallet_balance
+                        key: number_of_peers_out
+                    - type: INTEGER
+                      name: show
+                      value: '1'
+                    - type: INTEGER
+                      name: show
+                      value: '2'
+                - type: item
+                  x: '30'
+                  'y': '10'
+                  width: '15'
+                  height: '3'
+                  hide_header: 'YES'
+                  fields:
                     - type: INTEGER
                       name: show
                       value: '1'
@@ -831,135 +1342,137 @@ zabbix_export:
                       name: units_size
                       value: '20'
                 - type: item
-                  x: '16'
-                  'y': '2'
-                  width: '4'
-                  height: '3'
-                  hide_header: 'YES'
-                  fields:
-                    - type: INTEGER
-                      name: adv_conf
-                      value: '1'
-                    - type: INTEGER
-                      name: show
-                      value: '1'
-                    - type: INTEGER
-                      name: show
-                      value: '2'
-                    - type: STRING
-                      name: thresholds.color.0
-                      value: C62828
-                    - type: STRING
-                      name: thresholds.color.1
-                      value: 388E3C
-                    - type: STRING
-                      name: thresholds.threshold.0
-                      value: '0'
-                    - type: STRING
-                      name: thresholds.threshold.1
-                      value: '1'
-                - type: item
-                  x: '16'
-                  'y': '5'
-                  width: '4'
-                  height: '3'
-                  hide_header: 'YES'
-                  fields:
-                    - type: INTEGER
-                      name: adv_conf
-                      value: '1'
-                    - type: INTEGER
-                      name: show
-                      value: '1'
-                    - type: INTEGER
-                      name: show
-                      value: '2'
-                    - type: STRING
-                      name: thresholds.color.0
-                      value: C62828
-                    - type: STRING
-                      name: thresholds.color.1
-                      value: 388E3C
-                    - type: STRING
-                      name: thresholds.threshold.0
-                      value: '0'
-                    - type: STRING
-                      name: thresholds.threshold.1
-                      value: '1'
-                - type: item
-                  x: '20'
-                  'y': '2'
-                  width: '4'
-                  height: '3'
-                  hide_header: 'YES'
-                  fields:
-                    - type: INTEGER
-                      name: adv_conf
-                      value: '1'
-                    - type: INTEGER
-                      name: show
-                      value: '1'
-                    - type: INTEGER
-                      name: show
-                      value: '2'
-                    - type: STRING
-                      name: thresholds.color.0
-                      value: C62828
-                    - type: STRING
-                      name: thresholds.color.1
-                      value: 388E3C
-                    - type: STRING
-                      name: thresholds.threshold.0
-                      value: '0'
-                    - type: STRING
-                      name: thresholds.threshold.1
-                      value: '1'
-                - type: item
-                  x: '20'
-                  'y': '5'
-                  width: '4'
-                  height: '3'
-                  hide_header: 'YES'
-                  fields:
-                    - type: INTEGER
-                      name: adv_conf
-                      value: '1'
-                    - type: INTEGER
-                      name: show
-                      value: '1'
-                    - type: INTEGER
-                      name: show
-                      value: '2'
-                    - type: STRING
-                      name: thresholds.color.0
-                      value: C62828
-                    - type: STRING
-                      name: thresholds.color.1
-                      value: 388E3C
-                    - type: STRING
-                      name: thresholds.threshold.0
-                      value: '0'
-                    - type: STRING
-                      name: thresholds.threshold.1
-                      value: '1'
-                - type: item
-                  x: '20'
+                  x: '45'
                   'y': '10'
-                  width: '4'
+                  width: '15'
                   height: '3'
                   hide_header: 'YES'
                   fields:
                     - type: INTEGER
-                      name: adv_conf
+                      name: show
                       value: '1'
+                    - type: INTEGER
+                      name: show
+                      value: '2'
+                    - type: STRING
+                      name: units
+                      value: '!NLS'
+                    - type: INTEGER
+                      name: units_bold
+                      value: '0'
+                    - type: INTEGER
+                      name: units_size
+                      value: '20'
+                - type: item
+                  x: '48'
+                  'y': '2'
+                  width: '12'
+                  height: '3'
+                  hide_header: 'YES'
+                  fields:
+                    - type: INTEGER
+                      name: show
+                      value: '1'
+                    - type: INTEGER
+                      name: show
+                      value: '2'
+                    - type: STRING
+                      name: thresholds.0.color
+                      value: C62828
+                    - type: STRING
+                      name: thresholds.0.threshold
+                      value: '0'
+                    - type: STRING
+                      name: thresholds.1.color
+                      value: 388E3C
+                    - type: STRING
+                      name: thresholds.1.threshold
+                      value: '1'
+                - type: item
+                  x: '48'
+                  'y': '5'
+                  width: '12'
+                  height: '3'
+                  hide_header: 'YES'
+                  fields:
+                    - type: INTEGER
+                      name: show
+                      value: '1'
+                    - type: INTEGER
+                      name: show
+                      value: '2'
+                    - type: STRING
+                      name: thresholds.0.color
+                      value: C62828
+                    - type: STRING
+                      name: thresholds.0.threshold
+                      value: '0'
+                    - type: STRING
+                      name: thresholds.1.color
+                      value: 388E3C
+                    - type: STRING
+                      name: thresholds.1.threshold
+                      value: '1'
+                - type: item
+                  x: '60'
+                  'y': '2'
+                  width: '12'
+                  height: '3'
+                  hide_header: 'YES'
+                  fields:
+                    - type: INTEGER
+                      name: show
+                      value: '1'
+                    - type: INTEGER
+                      name: show
+                      value: '2'
+                    - type: STRING
+                      name: thresholds.0.color
+                      value: C62828
+                    - type: STRING
+                      name: thresholds.0.threshold
+                      value: '0'
+                    - type: STRING
+                      name: thresholds.1.color
+                      value: 388E3C
+                    - type: STRING
+                      name: thresholds.1.threshold
+                      value: '1'
+                - type: item
+                  x: '60'
+                  'y': '5'
+                  width: '12'
+                  height: '3'
+                  hide_header: 'YES'
+                  fields:
+                    - type: INTEGER
+                      name: show
+                      value: '1'
+                    - type: INTEGER
+                      name: show
+                      value: '2'
+                    - type: STRING
+                      name: thresholds.0.color
+                      value: C62828
+                    - type: STRING
+                      name: thresholds.0.threshold
+                      value: '0'
+                    - type: STRING
+                      name: thresholds.1.color
+                      value: 388E3C
+                    - type: STRING
+                      name: thresholds.1.threshold
+                      value: '1'
+                - type: item
+                  x: '60'
+                  'y': '10'
+                  width: '12'
+                  height: '3'
+                  hide_header: 'YES'
+                  fields:
                     - type: INTEGER
                       name: decimal_places
                       value: '0'
-                    - type: ITEM
-                      name: itemid
-                      value:
-                        host: Cosmos
-                        key: validator_jail
                     - type: INTEGER
                       name: show
                       value: '1'
@@ -973,6 +1486,17 @@ zabbix_export:
                       name: units_show
                       value: '0'
       valuemaps:
+        - uuid: ba5fe9411e394b6cabc2a5e59adae158
+          name: 'Bond status'
+          mappings:
+            - value: '0'
+              newvalue: Unbonded
+            - value: '1'
+              newvalue: Bonded
+            - value: '2'
+              newvalue: Unbonding
+            - value: '3'
+              newvalue: Unspecified
         - uuid: 552f6a530df946cd9c5ff1de9019715e
           name: 'Boolean status'
           mappings:
@@ -988,28 +1512,10 @@ zabbix_export:
             - value: '1'
               newvalue: Up
   triggers:
-    - uuid: 8d79cf9f729f46c089e3884662c049f0
-      expression: 'changecount(/Cosmos/latest-block-height,10m)=0 and last(/Cosmos/latest-block-timestamp)<>0'
-      name: 'No new blocks produced since {ITEM.LASTVALUE2}'
-      opdata: 'Latest block height: {ITEM.LASTVALUE1} Latest block timestamp: {ITEM.LASTVALUE2}'
-      priority: AVERAGE
     - uuid: ba36504244b5436ca847691937d9eed0
-      expression: last(/Cosmos/active_validators)-last(/Cosmos/validator_position)<=1
+      expression: last(/Cosmos/active_validators)-last(/Cosmos/validator_position)=0
       name: 'Validator at last position of active set'
       opdata: 'Current position: {ITEM.VALUE2} Active set: {ITEM.VALUE1}'
-      priority: WARNING
+      status: DISABLED
+      priority: INFO
       manual_close: 'YES'
-  graphs:
-    - uuid: d1bb1d99dfe0477a9a60fa5da7f49d1e
-      name: 'Missed Blocks'
-      yaxismax: '0'
-      show_work_period: 'NO'
-      show_triggers: 'NO'
-      type: EXPLODED
-      show_legend: 'NO'
-      graph_items:
-        - color: FF0000
-          calc_fnc: MIN
-          item:
-            host: Cosmos
-            key: validator_missed
